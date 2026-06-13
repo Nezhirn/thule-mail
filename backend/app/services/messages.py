@@ -65,11 +65,14 @@ async def list_messages(
 async def get_message(account_id: int, folder: str, uid: int, mark_seen: bool = False) -> dict:
     """Одно письмо с ленивой подгрузкой тела (BODY.PEEK — не трогает \\Seen)."""
     pool, _ = await _get_pool(account_id)
-    # readonly=not mark_seen: если хотим отметить прочитанным — открываем RW
-    await pool.run(imap_client.select_folder, folder, not mark_seen)
-    raw = await pool.run(imap_client.fetch_body, uid)
-    if raw is None:
-        raise ValueError("Письмо не найдено на сервере")
+    async with pool.session() as run:
+        # readonly=not mark_seen: если хотим отметить прочитанным — открываем RW
+        await run(imap_client.select_folder, folder, not mark_seen)
+        raw = await run(imap_client.fetch_body, uid)
+        if raw is None:
+            raise ValueError("Письмо не найдено на сервере")
+        if mark_seen:
+            await run(imap_client.set_flags, uid, ["\\Seen"], True)
 
     parsed = parse_full_message(raw)
 
@@ -83,7 +86,8 @@ async def get_message(account_id: int, folder: str, uid: int, mark_seen: bool = 
     )
 
     if mark_seen:
-        await set_flags(account_id, folder, uid, ["\\Seen"], add=True)
+        # Флаг уже выставлен на сервере внутри сессии выше — обновим кэш.
+        await _add_seen_in_cache(account_id, folder, uid)
 
     return {
         "account_id": account_id,
@@ -93,12 +97,28 @@ async def get_message(account_id: int, folder: str, uid: int, mark_seen: bool = 
     }
 
 
+async def _add_seen_in_cache(account_id: int, folder: str, uid: int) -> None:
+    db = get_db()
+    row = await db.fetchone(
+        "SELECT flags FROM messages_cache WHERE account_id = ? AND folder = ? AND uid = ?",
+        (account_id, folder, uid),
+    )
+    if row is not None:
+        current = set(row["flags"].split())
+        current.add("\\Seen")
+        await db.execute(
+            "UPDATE messages_cache SET flags = ? WHERE account_id = ? AND folder = ? AND uid = ?",
+            (" ".join(sorted(current)), account_id, folder, uid),
+        )
+
+
 async def set_flags(
     account_id: int, folder: str, uid: int, flags: list[str], add: bool
 ) -> None:
     pool, _ = await _get_pool(account_id)
-    await pool.run(imap_client.select_folder, folder, False)  # RW
-    await pool.run(imap_client.set_flags, uid, flags, add)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, False)  # RW
+        await run(imap_client.set_flags, uid, flags, add)
     # Обновим кэш.
     db = get_db()
     row = await db.fetchone(
@@ -119,8 +139,9 @@ async def set_flags(
 
 async def move_message(account_id: int, folder: str, uid: int, dest: str) -> None:
     pool, _ = await _get_pool(account_id)
-    await pool.run(imap_client.select_folder, folder, False)
-    await pool.run(imap_client.move_message, uid, dest)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, False)
+        await run(imap_client.move_message, uid, dest)
     db = get_db()
     await db.execute(
         "DELETE FROM messages_cache WHERE account_id = ? AND folder = ? AND uid = ?",
@@ -130,8 +151,9 @@ async def move_message(account_id: int, folder: str, uid: int, dest: str) -> Non
 
 async def delete_message(account_id: int, folder: str, uid: int) -> None:
     pool, _ = await _get_pool(account_id)
-    await pool.run(imap_client.select_folder, folder, False)
-    await pool.run(imap_client.delete_message, uid)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, False)
+        await run(imap_client.delete_message, uid)
     db = get_db()
     await db.execute(
         "DELETE FROM messages_cache WHERE account_id = ? AND folder = ? AND uid = ?",
@@ -139,10 +161,32 @@ async def delete_message(account_id: int, folder: str, uid: int) -> None:
     )
 
 
+async def mark_all_read(account_id: int, folder: str) -> int:
+    """Отметить все непрочитанные письма в папке как прочитанные.
+
+    Возвращает количество затронутых писем.
+    """
+    pool, _ = await _get_pool(account_id)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, False)  # RW
+        unseen = await run(imap_client.search_uids, "UNSEEN")
+        if unseen:
+            await run(imap_client.set_flags_bulk, unseen, ["\\Seen"], True)
+    # Обновим кэш: всем строкам папки без \\Seen дописываем флаг.
+    db = get_db()
+    await db.execute(
+        "UPDATE messages_cache SET flags = TRIM(flags || ' \\Seen') "
+        "WHERE account_id = ? AND folder = ? AND instr(flags, '\\Seen') = 0",
+        (account_id, folder),
+    )
+    return len(unseen)
+
+
 async def get_attachment(account_id: int, folder: str, uid: int, part: str) -> bytes | None:
     pool, _ = await _get_pool(account_id)
-    await pool.run(imap_client.select_folder, folder, True)
-    return await pool.run(imap_client.fetch_part, uid, part)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, True)
+        return await run(imap_client.fetch_part, uid, part)
 
 
 async def unified_inbox(cursor: int | None, limit: int) -> dict:

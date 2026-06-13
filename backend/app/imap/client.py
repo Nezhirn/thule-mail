@@ -106,6 +106,16 @@ def set_flags(client: IMAPClient, uid: int, flags: list[str], add: bool) -> None
         client.remove_flags([uid], flags)
 
 
+def set_flags_bulk(client: IMAPClient, uids: list[int], flags: list[str], add: bool) -> None:
+    """Добавить/снять флаги для множества UID одной командой."""
+    if not uids:
+        return
+    if add:
+        client.add_flags(uids, flags)
+    else:
+        client.remove_flags(uids, flags)
+
+
 def move_message(client: IMAPClient, uid: int, dest_folder: str) -> None:
     """Переместить письмо в другую папку (с фолбэком на copy+delete)."""
     try:

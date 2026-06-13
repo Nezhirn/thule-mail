@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { motion } from "framer-motion";
-import { Paperclip, RefreshCw, Search, X } from "lucide-react";
+import { CheckCheck, Paperclip, RefreshCw, Search, X } from "lucide-react";
+import { toast } from "sonner";
 import {
-  useFolderMessages, useMessageActions, useSearch, useUnifiedMessages,
+  useAccounts, useFolderMessages, useMessageActions, useSearch, useUnifiedMessages,
 } from "../api/hooks";
 import { useUI } from "../stores/ui";
 import type { MessageListItem } from "../api/types";
 import { formatListDate, colorFromString } from "../lib/format";
+import { localizeFolderName } from "../lib/folders";
 import { listItem } from "../lib/motion";
 
 export default function MessageList() {
@@ -29,6 +31,7 @@ export default function MessageList() {
   );
   const searchQ = useSearch(debounced, accountId, unified ? "all" : "account");
   const actions = useMessageActions();
+  const { data: accounts } = useAccounts();
 
   const searching = debounced.trim().length > 0;
   const listQuery = unified ? unifiedQ : folderQ;
@@ -37,14 +40,48 @@ export default function MessageList() {
   const isFetching = searching ? searchQ.isFetching : listQuery.isFetching;
   const title = searching
     ? "Результаты поиска"
-    : unified ? "Объединённый входящий" : selection.folder;
+    : unified ? "Объединённый входящий" : localizeFolderName(selection.folder);
   const unreadCount = messages.filter((m) => !m.seen).length;
 
-  const onSync = () => {
-    if (!unified) {
-      actions.sync.mutate({ accountId: selection.accountId, folder: selection.folder });
-    } else {
-      unifiedQ.refetch();
+  const onSync = async () => {
+    try {
+      if (!unified) {
+        await actions.sync.mutateAsync({
+          accountId: selection.accountId,
+          folder: selection.folder,
+        });
+      } else {
+        // Реальная синхронизация INBOX всех включённых аккаунтов, затем обновление.
+        const targets = (accounts ?? []).filter((a) => a.enabled);
+        await Promise.allSettled(
+          targets.map((a) => actions.sync.mutateAsync({ accountId: a.id, folder: "INBOX" })),
+        );
+        await unifiedQ.refetch();
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Ошибка синхронизации");
+    }
+  };
+
+  const onMarkAllRead = async () => {
+    try {
+      if (unified) {
+        // Прочитать INBOX всех включённых аккаунтов.
+        const targets = (accounts ?? []).filter((a) => a.enabled);
+        await Promise.all(
+          targets.map((a) =>
+            actions.markAllRead.mutateAsync({ accountId: a.id, folder: "INBOX" }),
+          ),
+        );
+      } else {
+        await actions.markAllRead.mutateAsync({
+          accountId: selection.accountId,
+          folder: selection.folder,
+        });
+      }
+      toast.success("Все письма отмечены прочитанными");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Не удалось отметить");
     }
   };
 
@@ -53,12 +90,22 @@ export default function MessageList() {
       <div className="glass-bar border-b border-sep px-4 pb-2.5 pt-3">
         <div className="flex items-center gap-2">
           <h2 className="truncate text-[17px] font-bold tracking-tight">{title}</h2>
+          {!searching && unreadCount > 0 && (
+            <button
+              onClick={onMarkAllRead}
+              disabled={actions.markAllRead.isPending}
+              className="ml-auto rounded-lg p-1.5 text-muted hover:bg-hover/5 disabled:opacity-50"
+              title="Прочитать все непрочитанные"
+            >
+              <CheckCheck size={16} />
+            </button>
+          )}
           <button
             onClick={onSync}
-            className="ml-auto rounded-lg p-1.5 text-muted hover:bg-hover/5"
+            className={`${!searching && unreadCount > 0 ? "" : "ml-auto"} rounded-lg p-1.5 text-muted hover:bg-hover/5`}
             title="Обновить"
           >
-            <RefreshCw size={15} className={isFetching ? "animate-spin" : ""} />
+            <RefreshCw size={15} className={isFetching || actions.sync.isPending ? "animate-spin" : ""} />
           </button>
         </div>
         <p className="mt-0.5 text-xs text-muted">

@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  ChevronRight, GripVertical, Inbox, Moon, PanelLeftClose, PanelLeftOpen,
+  ChevronRight, FolderOpen, GripVertical, Inbox, Moon, PanelLeftClose, PanelLeftOpen,
   PenSquare, Send, Settings, Star, Sun, Trash2,
 } from "lucide-react";
 import {
@@ -26,6 +26,7 @@ import {
 import type { FolderLayoutItem } from "../api/hooks";
 import { useUI } from "../stores/ui";
 import type { Account, Folder } from "../api/types";
+import { folderDisplayName, splitFolders } from "../lib/folders";
 import FolderContextMenu from "./FolderContextMenu";
 
 function folderIcon(name: string) {
@@ -213,16 +214,18 @@ function AccountGroup({
   account, dragHandle,
 }: { account: Account; dragHandle: Record<string, unknown> }) {
   const [open, setOpen] = useState(true);
+  const [othersOpen, setOthersOpen] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const { data: folders } = useFolders(open ? account.id : null);
   const layout = useUpdateFolderLayout(account.id);
 
-  const hiddenCount = (folders ?? []).filter((f) => f.hidden).length;
-  const visible = (folders ?? []).filter((f) => showHidden || !f.hidden);
-  // pinned сверху, затем по sort_order
-  const sorted = [...visible].sort(
-    (a, b) => Number(b.pinned) - Number(a.pinned) || a.sort_order - b.sort_order,
-  );
+  const all = folders ?? [];
+  const hiddenCount = all.filter((f) => f.hidden).length;
+  const { main, others } = splitFolders(all);
+  // Скрытые показываем внутри «Другие» по запросу.
+  const hiddenOthers = showHidden ? all.filter((f) => f.hidden) : [];
+  const othersAll = [...others, ...hiddenOthers];
+
   const [menu, setMenu] = useState<{ folder: Folder; x: number; y: number } | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -237,12 +240,16 @@ function AccountGroup({
     layout.mutate(payload);
   };
 
-  const onDragEnd = (e: DragEndEvent) => {
+  // Контекстное меню применяет patch к одной папке (на весь видимый набор).
+  const applyPatch = (target: Folder, patch: Partial<Folder>) =>
+    persist(all.map((f) => (f.name === target.name ? { ...f, ...patch } : f)));
+
+  const onOthersDragEnd = (e: DragEndEvent) => {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    const oldI = sorted.findIndex((f) => f.name === active.id);
-    const newI = sorted.findIndex((f) => f.name === over.id);
-    persist(arrayMove(sorted, oldI, newI));
+    const oldI = othersAll.findIndex((f) => f.name === active.id);
+    const newI = othersAll.findIndex((f) => f.name === over.id);
+    persist(arrayMove(othersAll, oldI, newI));
   };
 
   return (
@@ -269,25 +276,63 @@ function AccountGroup({
             transition={{ duration: 0.18 }}
             className="overflow-hidden pl-1.5"
           >
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-              <SortableContext items={sorted.map((f) => f.name)} strategy={verticalListSortingStrategy}>
-                {sorted.map((f) => (
-                  <SortableFolder
-                    key={f.name}
-                    folder={f}
-                    accountId={account.id}
-                    onContext={(x, y) => setMenu({ folder: f, x, y })}
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-            {hiddenCount > 0 && (
-              <button
-                onClick={() => setShowHidden((v) => !v)}
-                className="mt-0.5 px-2.5 py-1 text-[11px] text-faint hover:text-muted"
-              >
-                {showHidden ? "Спрятать скрытые" : `Показать скрытые (${hiddenCount})`}
-              </button>
+            {/* Основные папки — фиксированный порядок, локализованные имена */}
+            {main.map((f) => (
+              <FolderRow
+                key={f.name}
+                folder={f}
+                accountId={account.id}
+                onContext={(x, y) => setMenu({ folder: f, x, y })}
+              />
+            ))}
+
+            {/* Прочие папки — сворачиваемая секция «Другие» с drag&drop */}
+            {othersAll.length > 0 && (
+              <>
+                <button
+                  onClick={() => setOthersOpen((o) => !o)}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-1 text-[12px] text-muted hover:bg-hover/5"
+                >
+                  <motion.span animate={{ rotate: othersOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
+                    <ChevronRight size={11} />
+                  </motion.span>
+                  <FolderOpen size={14} className="opacity-80" />
+                  <span className="flex-1 text-left">Другие</span>
+                  <span className="text-[11px] text-faint">{othersAll.length}</span>
+                </button>
+                <AnimatePresence initial={false}>
+                  {othersOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden pl-2"
+                    >
+                      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onOthersDragEnd}>
+                        <SortableContext items={othersAll.map((f) => f.name)} strategy={verticalListSortingStrategy}>
+                          {othersAll.map((f) => (
+                            <SortableFolder
+                              key={f.name}
+                              folder={f}
+                              accountId={account.id}
+                              onContext={(x, y) => setMenu({ folder: f, x, y })}
+                            />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
+                      {hiddenCount > 0 && (
+                        <button
+                          onClick={() => setShowHidden((v) => !v)}
+                          className="mt-0.5 px-2.5 py-1 text-[11px] text-faint hover:text-muted"
+                        >
+                          {showHidden ? "Спрятать скрытые" : `Показать скрытые (${hiddenCount})`}
+                        </button>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </>
             )}
           </motion.div>
         )}
@@ -299,11 +344,46 @@ function AccountGroup({
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
-          onApply={(patch) =>
-            persist(sorted.map((f) => (f.name === menu.folder.name ? { ...f, ...patch } : f)))
-          }
+          onApply={(patch) => applyPatch(menu.folder, patch)}
         />
       )}
+    </div>
+  );
+}
+
+/** Папка как строка (для основных — без dnd). */
+function FolderRow({
+  folder, accountId, onContext, dragRef, dragProps, dragging,
+}: {
+  folder: Folder;
+  accountId: number;
+  onContext: (x: number, y: number) => void;
+  dragRef?: (el: HTMLElement | null) => void;
+  dragProps?: Record<string, unknown>;
+  dragging?: boolean;
+}) {
+  const { selection, setSelection } = useUI();
+  const active =
+    selection.kind === "folder" &&
+    selection.accountId === accountId &&
+    selection.folder === folder.name;
+
+  return (
+    <div ref={dragRef} {...dragProps} style={dragging ? { opacity: 0.5 } : undefined}>
+      <button
+        onClick={() => setSelection({ kind: "folder", accountId, folder: folder.name })}
+        onContextMenu={(e) => { e.preventDefault(); onContext(e.clientX, e.clientY); }}
+        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13.5px] transition ${
+          active ? "bg-accent/15 font-medium text-accent" : "text-content hover:bg-hover/5"
+        } ${folder.hidden ? "opacity-50" : ""}`}
+      >
+        <span className="opacity-85">{folderIcon(folder.name)}</span>
+        <span className="flex-1 truncate text-left">{folderDisplayName(folder)}</span>
+        {folder.pinned && <span className="text-[10px]">📌</span>}
+        {folder.unread ? (
+          <span className={`text-xs tabular-nums ${active ? "text-accent" : "text-faint"}`}>{folder.unread}</span>
+        ) : null}
+      </button>
     </div>
   );
 }
@@ -311,35 +391,18 @@ function AccountGroup({
 function SortableFolder({
   folder, accountId, onContext,
 }: { folder: Folder; accountId: number; onContext: (x: number, y: number) => void }) {
-  const { selection, setSelection } = useUI();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: folder.name });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-  const active =
-    selection.kind === "folder" &&
-    selection.accountId === accountId &&
-    selection.folder === folder.name;
-
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <button
-        onClick={() => setSelection({ kind: "folder", accountId, folder: folder.name })}
-        onContextMenu={(e) => { e.preventDefault(); onContext(e.clientX, e.clientY); }}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13.5px] transition ${
-          active ? "bg-accent/15 font-medium text-accent" : "text-content hover:bg-hover/5"
-        }`}
-      >
-        <span className="opacity-85">{folderIcon(folder.name)}</span>
-        <span className="flex-1 truncate text-left">{folder.alias || folder.name}</span>
-        {folder.pinned && <span className="text-[10px]">📌</span>}
-        {folder.unread ? (
-          <span className={`text-xs tabular-nums ${active ? "text-accent" : "text-faint"}`}>{folder.unread}</span>
-        ) : null}
-      </button>
+    <div style={{ transform: CSS.Transform.toString(transform), transition }}>
+      <FolderRow
+        folder={folder}
+        accountId={accountId}
+        onContext={onContext}
+        dragRef={setNodeRef}
+        dragProps={{ ...attributes, ...listeners }}
+        dragging={isDragging}
+      />
     </div>
   );
 }

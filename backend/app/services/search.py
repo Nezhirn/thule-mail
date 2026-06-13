@@ -39,6 +39,7 @@ async def search_cache(query: str, account_id: int | None, limit: int = 100) -> 
 async def search_imap(account_id: int, folder: str, query: str) -> list[int]:
     """Серверный IMAP SEARCH по теме/телу — UID'ы (для углублённого поиска)."""
     pool, _ = await _get_pool(account_id)
-    await pool.run(imap_client.select_folder, folder, True)
-    criteria = ["OR", "SUBJECT", query, "BODY", query]
-    return await pool.run(imap_client.search_uids, criteria)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, True)
+        criteria = ["OR", "SUBJECT", query, "BODY", query]
+        return await run(imap_client.search_uids, criteria)

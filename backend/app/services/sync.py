@@ -74,37 +74,41 @@ def _flags_to_str(flags) -> str:
 
 
 async def sync_folder(account_id: int, folder: str, limit: int = 100) -> dict:
-    """Синхронизировать одну папку. Возвращает сводку (сколько новых)."""
+    """Синхронизировать одну папку. Возвращает сводку (сколько новых).
+
+    Вся последовательность SELECT→SEARCH→FETCH идёт на ОДНОМ соединении
+    (pool.session), иначе FETCH/SEARCH попадут на невыбранное соединение.
+    """
     pool, _ = await _get_pool(account_id)
 
-    # 1. Выбрать папку (readonly — не трогаем \\Seen) и узнать UIDVALIDITY.
-    info = await pool.run(imap_client.select_folder, folder, True)
-    uidvalidity = info["uidvalidity"]
+    async with pool.session() as run:
+        # 1. Выбрать папку (readonly — не трогаем \\Seen) и узнать UIDVALIDITY.
+        info = await run(imap_client.select_folder, folder, True)
+        uidvalidity = info["uidvalidity"]
 
-    stored_validity, last_uid = await _get_sync_state(account_id, folder)
-    if stored_validity and stored_validity != uidvalidity:
-        logger.info("UIDVALIDITY изменился для %s/%s — инвалидирую кэш", account_id, folder)
-        await _clear_folder_cache(account_id, folder)
-        last_uid = 0
+        stored_validity, last_uid = await _get_sync_state(account_id, folder)
+        if stored_validity and stored_validity != uidvalidity:
+            logger.info("UIDVALIDITY изменился для %s/%s — инвалидирую кэш", account_id, folder)
+            await _clear_folder_cache(account_id, folder)
+            last_uid = 0
 
-    # 2. Получить список UID.
-    all_uids = sorted(await pool.run(imap_client.search_uids, "ALL"))
-    if not all_uids:
-        await _save_sync_state(account_id, folder, uidvalidity, 0)
-        return {"folder": folder, "new": 0, "total": 0}
+        # 2. Получить список UID.
+        all_uids = sorted(await run(imap_client.search_uids, "ALL"))
+        if not all_uids:
+            await _save_sync_state(account_id, folder, uidvalidity, 0)
+            return {"folder": folder, "new": 0, "total": 0}
 
-    if last_uid == 0:
-        # первый синк — только последнее окно
-        new_uids = all_uids[-limit:]
-    else:
-        new_uids = [u for u in all_uids if u > last_uid]
+        if last_uid == 0:
+            new_uids = all_uids[-limit:]  # первый синк — только последнее окно
+        else:
+            new_uids = [u for u in all_uids if u > last_uid]
 
-    # 3. Освежить флаги недавнего окна (прочитано/помечено меняется без новых UID).
-    refresh_window = [u for u in all_uids[-limit:] if u <= last_uid]
+        # 3. Освежить флаги недавнего окна (прочитано/помечено меняется без новых UID).
+        refresh_window = [u for u in all_uids[-limit:] if u <= last_uid]
 
-    new_count = await _fetch_and_store(pool, account_id, folder, uidvalidity, new_uids)
-    if refresh_window:
-        await _refresh_flags(pool, account_id, folder, refresh_window)
+        new_count = await _fetch_and_store(run, account_id, folder, uidvalidity, new_uids)
+        if refresh_window:
+            await _refresh_flags(run, account_id, folder, refresh_window)
 
     max_uid = max(all_uids)
     await _save_sync_state(account_id, folder, uidvalidity, max_uid)
@@ -112,7 +116,7 @@ async def sync_folder(account_id: int, folder: str, limit: int = 100) -> dict:
 
 
 async def _fetch_and_store(
-    pool: ImapPool, account_id: int, folder: str, uidvalidity: int, uids: list[int]
+    run, account_id: int, folder: str, uidvalidity: int, uids: list[int]
 ) -> int:
     if not uids:
         return 0
@@ -122,7 +126,7 @@ async def _fetch_and_store(
     chunk = 100
     for i in range(0, len(uids), chunk):
         batch = uids[i : i + chunk]
-        resp = await pool.run(imap_client.fetch_headers, batch)
+        resp = await run(imap_client.fetch_headers, batch)
         rows = []
         for uid, data in resp.items():
             envelope = data.get(b"ENVELOPE")
@@ -163,10 +167,10 @@ async def _fetch_and_store(
 
 
 async def _refresh_flags(
-    pool: ImapPool, account_id: int, folder: str, uids: list[int]
+    run, account_id: int, folder: str, uids: list[int]
 ) -> None:
     db = get_db()
-    resp = await pool.run(imap_client.fetch_headers, uids)
+    resp = await run(imap_client.fetch_headers, uids)
     updates = []
     for uid, data in resp.items():
         updates.append((_flags_to_str(data.get(b"FLAGS")), account_id, folder, int(uid)))

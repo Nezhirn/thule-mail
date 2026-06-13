@@ -77,6 +77,21 @@ async def delete_message(
     await svc.delete_message(account_id, folder_name, uid)
 
 
+@router.post("/messages/mark_all_read")
+async def mark_all_read(
+    account_id: int,
+    folder: str = Query(...),
+) -> dict:
+    folder_name = decode_folder_param(folder)
+    try:
+        affected = await svc.mark_all_read(account_id, folder_name)
+        return {"affected": affected}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ошибка: {exc}"
+        ) from exc
+
+
 @router.post("/sync")
 async def force_sync(
     account_id: int,

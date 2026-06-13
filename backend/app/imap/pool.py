@@ -65,19 +65,44 @@ class ImapPool:
             f"Не удалось подключиться к IMAP {self._params.host}: {last_exc}"
         )
 
+    async def _is_alive(self, conn: IMAPClient) -> bool:
+        """Проверить живость соединения дешёвым NOOP.
+
+        Провайдеры вроде mail.ru/bk.ru закрывают простаивающие IMAP-сессии,
+        поэтому прогретые соединения протухают. NOOP перед выдачей гарантирует,
+        что наружу уйдёт живое соединение.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(self._executor, conn.noop)
+            return True
+        except Exception:
+            return False
+
+    async def _get_live_conn(self) -> IMAPClient:
+        """Вернуть гарантированно живое соединение (из пула или новое)."""
+        async with self._lock:
+            while not self._queue.empty():
+                conn = self._queue.get_nowait()
+                if await self._is_alive(conn):
+                    return conn
+                self._created -= 1
+                await self._safe_logout(conn)
+            if self._created < self._size:
+                return await self._create_connection()
+        # Пул занят — подождать освобождения и проверить живость.
+        conn = await self._queue.get()
+        if await self._is_alive(conn):
+            return conn
+        async with self._lock:
+            self._created -= 1
+        await self._safe_logout(conn)
+        return await self._get_live_conn()
+
     @asynccontextmanager
     async def _acquire(self):
-        """Взять соединение из пула (или создать, если ещё не достигнут размер)."""
-        conn: IMAPClient
-        if self._queue.empty() and self._created < self._size:
-            async with self._lock:
-                if self._queue.empty() and self._created < self._size:
-                    conn = await self._create_connection()
-                else:
-                    conn = await self._queue.get()
-        else:
-            conn = await self._queue.get()
-
+        """Взять живое соединение из пула (или создать)."""
+        conn = await self._get_live_conn()
         broken = False
         try:
             yield conn
@@ -88,25 +113,21 @@ class ImapPool:
             raise
         finally:
             if broken:
-                self._created -= 1
+                async with self._lock:
+                    self._created -= 1
                 await self._safe_logout(conn)
-                # Восстановим ёмкость пула в фоне.
-                asyncio.create_task(self._replenish())
             else:
                 await self._queue.put(conn)
-
-    async def _replenish(self) -> None:
-        try:
-            conn = await self._create_connection()
-            await self._queue.put(conn)
-        except Exception as exc:
-            logger.warning("Не удалось восполнить пул: %s", exc)
 
     async def run(self, fn: Callable[..., Any], *args: Any) -> Any:
         """Выполнить блокирующую операцию client.* на соединении из пула.
 
         fn вызывается как fn(conn, *args) внутри executor'а. При обрыве —
         одна повторная попытка на свежем соединении.
+
+        ВНИМАНИЕ: для последовательности зависимых операций (SELECT → SEARCH →
+        FETCH) используйте session(): состояние выбранной папки живёт в одном
+        соединении, и разные run() могут попасть на разные соединения пула.
         """
         loop = asyncio.get_running_loop()
         try:
@@ -115,6 +136,20 @@ class ImapPool:
         except (IMAPClientAbortError, ConnectionError, OSError):
             async with self._acquire() as conn:
                 return await loop.run_in_executor(self._executor, fn, conn, *args)
+
+    @asynccontextmanager
+    async def session(self):
+        """Закрепить ОДНО соединение на серию операций (SELECT+SEARCH+FETCH).
+
+        Внутри блока возвращается корутина run(fn, *args), всегда выполняющая
+        fn на одном и том же соединении. Между вызовами можно делать async-работу
+        (запись в БД) — соединение удерживается эксклюзивно этой задачей.
+        """
+        loop = asyncio.get_running_loop()
+        async with self._acquire() as conn:
+            async def run(fn: Callable[..., Any], *args: Any) -> Any:
+                return await loop.run_in_executor(self._executor, fn, conn, *args)
+            yield run
 
     async def close(self) -> None:
         while not self._queue.empty():

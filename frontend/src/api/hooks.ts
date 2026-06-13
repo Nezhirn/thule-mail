@@ -219,5 +219,12 @@ export function useMessageActions() {
         api.post(`/api/accounts/${accountId}/sync?folder=${encodeFolder(folder)}`),
       onSuccess: invalidate,
     }),
+    markAllRead: useMutation({
+      mutationFn: ({ accountId, folder }: { accountId: number; folder: string }) =>
+        api.post<{ affected: number }>(
+          `/api/accounts/${accountId}/messages/mark_all_read?folder=${encodeFolder(folder)}`,
+        ),
+      onSuccess: invalidate,
+    }),
   };
 }
