@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Темы через CSS-переменные. Значения в формате "R G B" для <alpha-value>. ── */
+:root,
+.light {
+  --c-sidebar: 245 245 247;
+  --c-surface: 255 255 255;
+  --c-elevated: 255 255 255;
+  --c-accent: 10 132 255;       /* Apple blue */
+  --c-accent-soft: 10 132 255;  /* используем с alpha в utility */
+  --c-text: 29 29 31;
+  --c-text-muted: 110 110 115;
+  --c-text-faint: 161 161 166;
+  --c-separator: 0 0 0;         /* применяется с низкой alpha */
+  --c-hover: 0 0 0;
+  --shadow-pane: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  /* Стеклянные (frosted) поверхности — полупрозрачные, поверх блюрятся. */
+  --glass-sidebar: 245 245 247;
+  --glass-alpha: 0.62;
+  --glass-panel: 255 255 255;
+  --glass-panel-alpha: 0.55;
+  --glass-bar: 255 255 255;
+  --glass-bar-alpha: 0.7;
+
+  /* Фон-подложка под стеклом: мягкий цветной градиент (premium). */
+  --bg-blob-1: 10 132 255;
+  --bg-blob-2: 191 90 242;
+  --bg-blob-3: 90 200 250;
+  --bg-base: 236 237 241;
+}
+
+.dark {
+  --c-sidebar: 28 28 30;        /* #1C1C1E из ТЗ */
+  --c-surface: 28 28 30;
+  --c-elevated: 44 44 46;
+  --c-accent: 10 132 255;
+  --c-accent-soft: 10 132 255;
+  --c-text: 235 235 240;
+  --c-text-muted: 152 152 160;
+  --c-text-faint: 110 110 118;
+  --c-separator: 255 255 255;
+  --c-hover: 255 255 255;
+  --shadow-pane: 0 1px 3px rgba(0, 0, 0, 0.4);
+
+  --glass-sidebar: 30 30 33;
+  --glass-alpha: 0.55;
+  --glass-panel: 32 32 35;
+  --glass-panel-alpha: 0.5;
+  --glass-bar: 38 38 42;
+  --glass-bar-alpha: 0.6;
+
+  --bg-blob-1: 10 132 255;
+  --bg-blob-2: 94 92 230;
+  --bg-blob-3: 48 209 88;
+  --bg-base: 16 16 18;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  color: rgb(var(--c-text));
+  -webkit-font-smoothing: antialiased;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", Roboto, sans-serif;
+  /* Цветная подложка под frosted-стеклом интерфейса. */
+  background-color: rgb(var(--bg-base));
+  background-image:
+    radial-gradient(40rem 40rem at 12% -8%, rgb(var(--bg-blob-1) / 0.22), transparent 60%),
+    radial-gradient(36rem 36rem at 105% 8%, rgb(var(--bg-blob-2) / 0.18), transparent 60%),
+    radial-gradient(30rem 30rem at 80% 110%, rgb(var(--bg-blob-3) / 0.16), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* ── Frosted-glass поверхности ───────────────────────────────────────── */
+.glass-sidebar {
+  background: rgb(var(--glass-sidebar) / var(--glass-alpha));
+  backdrop-filter: saturate(180%) blur(28px);
+  -webkit-backdrop-filter: saturate(180%) blur(28px);
+}
+.glass-panel {
+  background: rgb(var(--glass-panel) / var(--glass-panel-alpha));
+  backdrop-filter: saturate(180%) blur(24px);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+}
+.glass-bar {
+  background: rgb(var(--glass-bar) / var(--glass-bar-alpha));
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+.glass-modal {
+  background: rgb(var(--glass-panel) / 0.85);
+  backdrop-filter: saturate(180%) blur(40px);
+  -webkit-backdrop-filter: saturate(180%) blur(40px);
+}
+
+/* Тонкие разделители/ховеры через alpha от семантической переменной. */
+.border-sep { border-color: rgb(var(--c-separator) / 0.08); }
+.bg-hoverable:hover { background: rgb(var(--c-hover) / 0.04); }
+
+/* Контент Tiptap-редактора в composer. */
+.prose-mail { font-size: 14px; line-height: 1.6; }
+.prose-mail p { margin: 0 0 0.6em; }
+.prose-mail ul { list-style: disc; padding-left: 1.4em; margin: 0 0 0.6em; }
+.prose-mail ol { list-style: decimal; padding-left: 1.4em; margin: 0 0 0.6em; }
+.prose-mail strong { font-weight: 600; }
+.prose-mail a { color: rgb(var(--c-accent)); }
+.ProseMirror:focus { outline: none; }
+
+/* Скроллбары в духе macOS. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-text-faint) / 0.5);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-text-faint) / 0.8); }
+
+/* Уважать prefers-reduced-motion: гасим крупные движения (см. motion-пресеты). */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

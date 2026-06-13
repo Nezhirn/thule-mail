@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThuleMail — прототип «Apple Mail»</title>
+<style>
+  :root {
+    --bg-sidebar: rgba(245, 245, 247, 0.8);
+    --bg-list: #ffffff;
+    --bg-reading: #ffffff;
+    --accent: #0a84ff;
+    --text: #1d1d1f;
+    --text-secondary: #86868b;
+    --text-tertiary: #a1a1a6;
+    --separator: rgba(0,0,0,0.07);
+    --hover: rgba(0,0,0,0.035);
+    --selected: #0a84ff;
+    --unread-dot: #0a84ff;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    background: #e8e8ea;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 250px 360px 1fr;
+    height: 100vh;
+    background: var(--bg-list);
+  }
+
+  /* ── Sidebar ───────────────────────────── */
+  .sidebar {
+    background: var(--bg-sidebar);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-right: 1px solid var(--separator);
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-y: auto;
+  }
+  .compose-btn {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--accent); color: white;
+    border: none; border-radius: var(--radius);
+    padding: 9px 12px; font-size: 14px; font-weight: 500;
+    cursor: pointer; margin-bottom: 14px;
+    box-shadow: 0 1px 2px rgba(10,132,255,0.3);
+    transition: transform .12s ease, filter .12s ease;
+  }
+  .compose-btn:hover { filter: brightness(1.07); }
+  .compose-btn:active { transform: scale(0.97); }
+
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 10px; border-radius: 6px;
+    color: var(--text); cursor: pointer;
+    font-size: 13.5px; position: relative;
+    transition: background .1s ease;
+  }
+  .nav-item:hover { background: var(--hover); }
+  .nav-item.active { background: rgba(10,132,255,0.12); color: var(--accent); font-weight: 500; }
+  .nav-item .icon { width: 17px; text-align: center; opacity: .85; font-size: 14px; }
+  .nav-item .count { margin-left: auto; color: var(--text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .nav-item.active .count { color: var(--accent); }
+
+  .section-label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-tertiary);
+    padding: 14px 10px 4px; cursor: pointer;
+  }
+  .section-label .chevron { font-size: 9px; transition: transform .15s; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .sub { padding-left: 8px; }
+
+  .sidebar-footer {
+    margin-top: auto; padding-top: 12px; display: flex; gap: 4px;
+    border-top: 1px solid var(--separator);
+  }
+  .footer-btn { flex: 1; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding: 7px; border-radius: 6px; color: var(--text-secondary); cursor: pointer; font-size: 12.5px; }
+  .footer-btn:hover { background: var(--hover); }
+
+  /* ── Message list ──────────────────────── */
+  .list {
+    border-right: 1px solid var(--separator);
+    display: flex; flex-direction: column;
+    background: var(--bg-list);
+    overflow: hidden;
+  }
+  .list-header {
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid var(--separator);
+    backdrop-filter: blur(10px);
+  }
+  .list-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+  .list-sub { font-size: 12px; color: var(--text-secondary); margin-top: 1px; }
+  .search {
+    margin-top: 10px; display: flex; align-items: center; gap: 7px;
+    background: rgba(0,0,0,0.05); border-radius: 7px; padding: 6px 10px;
+    color: var(--text-tertiary); font-size: 13px;
+  }
+  .search input { border: none; background: transparent; outline: none; flex: 1; font: inherit; color: var(--text); }
+
+  .messages { overflow-y: auto; flex: 1; }
+  .msg {
+    padding: 10px 16px 11px; border-bottom: 1px solid var(--separator);
+    cursor: pointer; position: relative; transition: background .1s ease;
+  }
+  .msg:hover { background: var(--hover); }
+  .msg.selected { background: var(--selected); }
+  .msg.selected * { color: white !important; }
+  .msg.selected .msg-snippet { color: rgba(255,255,255,0.8) !important; }
+  .msg-row1 { display: flex; align-items: baseline; gap: 8px; }
+  .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unread-dot); flex: none; margin-top: 5px; }
+  .unread-dot.read { background: transparent; }
+  .msg-from { font-weight: 600; font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg-date { font-size: 12px; color: var(--text-tertiary); flex: none; }
+  .msg-subject { font-size: 13.5px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg-snippet { font-size: 13px; color: var(--text-secondary); margin-top: 2px; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .msg-acc-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .msg-tags { display: flex; gap: 5px; margin-top: 5px; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 5px; background: rgba(0,0,0,0.06); color: var(--text-secondary); }
+  .attach-icon { font-size: 11px; color: var(--text-tertiary); }
+
+  /* ── Reading pane ──────────────────────── */
+  .reading { display: flex; flex-direction: column; background: var(--bg-reading); overflow: hidden; }
+  .reading-toolbar {
+    display: flex; align-items: center; gap: 4px; padding: 10px 20px;
+    border-bottom: 1px solid var(--separator);
+  }
+  .tool-btn {
+    width: 34px; height: 30px; display: flex; align-items: center; justify-content: center;
+    border-radius: 7px; color: var(--text-secondary); cursor: pointer; font-size: 15px;
+    transition: background .1s;
+  }
+  .tool-btn:hover { background: var(--hover); color: var(--text); }
+  .reading-body { padding: 24px 32px; overflow-y: auto; flex: 1; }
+  .rb-subject { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; }
+  .rb-meta { display: flex; align-items: center; gap: 12px; margin: 18px 0 6px; }
+  .avatar {
+    width: 40px; height: 40px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 600; font-size: 16px;
+  }
+  .rb-from-name { font-weight: 600; font-size: 14px; }
+  .rb-from-email { font-size: 12.5px; color: var(--text-secondary); }
+  .rb-to { font-size: 12.5px; color: var(--text-secondary); margin-top: 1px; }
+  .rb-time { margin-left: auto; font-size: 12.5px; color: var(--text-tertiary); }
+  .img-banner {
+    display: flex; align-items: center; gap: 10px; margin: 18px 0;
+    background: #fff8e6; border: 1px solid #ffe3a3; border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; color: #8a6d1a;
+  }
+  .img-banner button {
+    margin-left: auto; background: white; border: 1px solid #e0c97a;
+    color: #8a6d1a; padding: 5px 12px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 12.5px;
+  }
+  .rb-content { font-size: 15px; line-height: 1.6; color: #2a2a2c; max-width: 680px; }
+  .rb-content p { margin-bottom: 14px; }
+  .rb-content a { color: var(--accent); text-decoration: none; }
+  .attachments { display: flex; gap: 10px; margin-top: 24px; flex-wrap: wrap; }
+  .att-card {
+    display: flex; align-items: center; gap: 10px; border: 1px solid var(--separator);
+    border-radius: 8px; padding: 8px 12px; font-size: 12.5px; cursor: pointer; transition: background .1s;
+  }
+  .att-card:hover { background: var(--hover); }
+  .att-thumb { width: 32px; height: 32px; border-radius: 6px; background: linear-gradient(135deg,#0a84ff,#5ac8fa);
+    display:flex; align-items:center; justify-content:center; color:white; font-size:14px; }
+  .att-name { font-weight: 500; }
+  .att-size { color: var(--text-tertiary); font-size: 11px; }
+
+  ::-webkit-scrollbar { width: 9px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+  .style-badge { position: fixed; bottom: 14px; right: 16px; background: rgba(0,0,0,0.75); color: white;
+    padding: 6px 12px; border-radius: 20px; font-size: 12px; backdrop-filter: blur(8px); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <button class="compose-btn"><span>✏️</span> Написать</button>
+
+    <div class="nav-item active"><span class="icon">★</span> Объединённый входящий <span class="count">24</span></div>
+    <div class="nav-item"><span class="icon">🏴</span> С флажком <span class="count">3</span></div>
+    <div class="nav-item"><span class="icon">📝</span> Черновики <span class="count">1</span></div>
+
+    <div class="section-label"><span class="chevron">▼</span><span class="dot" style="background:#0a84ff"></span> Личная почта</div>
+    <div class="sub">
+      <div class="nav-item"><span class="icon">📥</span> Входящие <span class="count">12</span></div>
+      <div class="nav-item"><span class="icon">📌</span> Важное</div>
+      <div class="nav-item"><span class="icon">📤</span> Отправленные</div>
+      <div class="nav-item"><span class="icon">🗑</span> Корзина</div>
+    </div>
+
+    <div class="section-label"><span class="chevron">▼</span><span class="dot" style="background:#30d158"></span> Рабочая почта</div>
+    <div class="sub">
+      <div class="nav-item"><span class="icon">📥</span> Входящие <span class="count">12</span></div>
+      <div class="nav-item"><span class="icon">📤</span> Отправленные</div>
+    </div>
+
+    <div class="section-label"><span class="chevron" style="transform:rotate(-90deg)">▼</span><span class="dot" style="background:#ff9f0a"></span> Подписки</div>
+
+    <div class="sidebar-footer">
+      <div class="footer-btn">⚙️ Аккаунты</div>
+      <div class="footer-btn">🎨 Тема</div>
+    </div>
+  </aside>
+
+  <!-- Message list -->
+  <section class="list">
+    <div class="list-header">
+      <div class="list-title">Объединённый входящий</div>
+      <div class="list-sub">24 непрочитанных · 3 аккаунта</div>
+      <div class="search">🔍 <input placeholder="Поиск по всем ящикам"></div>
+    </div>
+    <div class="messages" id="messages"></div>
+  </section>
+
+  <!-- Reading pane -->
+  <section class="reading">
+    <div class="reading-toolbar">
+      <div class="tool-btn" title="Ответить">↩️</div>
+      <div class="tool-btn" title="Ответить всем">↩️↩️</div>
+      <div class="tool-btn" title="Переслать">➡️</div>
+      <div style="width:1px;height:18px;background:var(--separator);margin:0 6px"></div>
+      <div class="tool-btn" title="В архив">🗄</div>
+      <div class="tool-btn" title="Удалить">🗑</div>
+      <div class="tool-btn" title="В спам">🚫</div>
+      <div class="tool-btn" title="Флажок" style="margin-left:auto">🏴</div>
+    </div>
+    <div class="reading-body">
+      <div class="rb-subject" id="rb-subject">Подтверждение бронирования № 48-1203</div>
+      <div class="rb-meta">
+        <div class="avatar" style="background:linear-gradient(135deg,#0a84ff,#5ac8fa)">B</div>
+        <div>
+          <div class="rb-from-name">Booking.com</div>
+          <div class="rb-from-email">noreply@booking.com</div>
+          <div class="rb-to">Кому: rustein.usa@gmail.com</div>
+        </div>
+        <div class="rb-time">Сегодня, 14:32</div>
+      </div>
+      <div class="img-banner">
+        🖼 Внешние изображения заблокированы для защиты приватности.
+        <button>Показать изображения</button>
+      </div>
+      <div class="rb-content">
+        <p>Здравствуйте, Андрей!</p>
+        <p>Спасибо за бронирование. Мы рады подтвердить ваше размещение в отеле <b>«Северное сияние»</b> с 18 по 22 июня. Номер бронирования: <a href="#">48-1203</a>.</p>
+        <p>Заселение возможно с 14:00, выезд до 12:00. Если планы изменятся, бесплатная отмена доступна до 17 июня включительно.</p>
+        <p>Хорошего путешествия!<br>Команда Booking.com</p>
+      </div>
+      <div class="attachments">
+        <div class="att-card"><div class="att-thumb">📄</div><div><div class="att-name">Ваучер.pdf</div><div class="att-size">248 КБ</div></div></div>
+        <div class="att-card"><div class="att-thumb">🗺</div><div><div class="att-name">Карта проезда.png</div><div class="att-size">1,2 МБ</div></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="style-badge">Стиль 1 — Apple Mail</div>
+
+<script>
+  const data = [
+    { from:'Booking.com', subj:'Подтверждение бронирования № 48-1203', snip:'Спасибо за бронирование. Мы рады подтвердить ваше размещение в отеле «Северное сияние» с 18 по 22 июня.', date:'14:32', unread:true, acc:'#0a84ff', tags:['Поездки'], att:true },
+    { from:'Анна Ковалёва', subj:'Re: Дизайн-макеты к пятнице', snip:'Привет! Посмотрела последнюю версию — выглядит отлично. Осталось поправить отступы в шапке и можно отдавать в разработку.', date:'13:05', unread:true, acc:'#30d158', tags:['Работа'], att:false },
+    { from:'GitHub', subj:'[thulemail] PR #42 готов к ревью', snip:'andrew-dev запросил ваше ревью изменений в ветке feature/imap-pool. 14 файлов изменено, +820 −96.', date:'11:48', unread:true, acc:'#30d158', tags:[], att:false },
+    { from:'Яндекс.Афиша', subj:'Концерты этой недели в вашем городе', snip:'Подобрали для вас события: джазовый вечер в субботу, выставка современного искусства и ещё 6 событий.', date:'10:20', unread:false, acc:'#0a84ff', tags:['Подписки'], att:false },
+    { from:'Дмитрий Соколов', subj:'Договор на подпись', snip:'Андрей, добрый день. Высылаю финальную версию договора. Прошу проверить реквизиты и подписать.', date:'Вчера', unread:false, acc:'#30d158', tags:['Работа'], att:true },
+    { from:'Apple', subj:'Ваш чек от App Store', snip:'Спасибо за покупку. Подписка iCloud+ 200 ГБ продлена. Сумма: 149 ₽.', date:'Вчера', unread:false, acc:'#0a84ff', tags:[], att:false },
+    { from:'Мария П.', subj:'Фото с выходных 📸', snip:'Скинула все фотографии с пикника! Особенно классно вышли закатные кадры у озера.', date:'11 июн', unread:false, acc:'#0a84ff', tags:['Личное'], att:true },
+    { from:'LinkedIn', subj:'5 новых вакансий по вашему профилю', snip:'Frontend Developer в Notion, Product Engineer в Linear и ещё 3 позиции соответствуют вашим интересам.', date:'10 июн', unread:false, acc:'#30d158', tags:[], att:false },
+  ];
+  const box = document.getElementById('messages');
+  box.innerHTML = data.map((m,i) => `
+    <div class="msg ${i===0?'selected':''}" data-i="${i}">
+      <div class="msg-row1">
+        <div class="unread-dot ${m.unread?'':'read'}"></div>
+        <span class="msg-from">${m.from}</span>
+        <span class="msg-acc-dot" style="background:${m.acc}"></span>
+        <span class="msg-date">${m.date}</span>
+      </div>
+      <div class="msg-subject" style="padding-left:16px">${m.subj} ${m.att?'<span class="attach-icon">📎</span>':''}</div>
+      <div class="msg-snippet" style="padding-left:16px">${m.snip}</div>
+      ${m.tags.length?`<div class="msg-tags" style="padding-left:16px">${m.tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>`:''}
+    </div>`).join('');
+  box.addEventListener('click', e => {
+    const el = e.target.closest('.msg'); if(!el) return;
+    document.querySelectorAll('.msg').forEach(x=>x.classList.remove('selected'));
+    el.classList.add('selected');
+    const m = data[el.dataset.i];
+    document.getElementById('rb-subject').textContent = m.subj;
+  });
+</script>
+</body>
+</html>

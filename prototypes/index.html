@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThuleMail — выбор стиля UI</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:#0f1115; color:#e8e8ea;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:32px; padding:40px; }
+  h1 { font-size:30px; font-weight:700; letter-spacing:-0.02em; }
+  .sub { color:#9b9da3; margin-top:-22px; font-size:15px; }
+  .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; max-width:1100px; width:100%; }
+  .card { border:1px solid #2a2d33; border-radius:14px; overflow:hidden; background:#181a1f; cursor:pointer;
+    transition:transform .15s, border-color .15s; text-decoration:none; color:inherit; display:flex; flex-direction:column; }
+  .card:hover { transform:translateY(-4px); border-color:#3574f0; }
+  .preview { height:160px; display:flex; align-items:center; justify-content:center; font-size:46px; }
+  .p1 { background:linear-gradient(135deg,#f5f5f7,#e6e6ea); }
+  .p2 { background:linear-gradient(135deg,#ffffff,#f3f3f1); }
+  .p3 { background:linear-gradient(135deg,#2b2d30,#1e1f22); }
+  .card-body { padding:16px 18px; }
+  .card-title { font-size:17px; font-weight:600; }
+  .card-desc { font-size:13px; color:#9b9da3; margin-top:5px; line-height:1.45; }
+  .tag { display:inline-block; font-size:11px; color:#3574f0; border:1px solid #3574f0; border-radius:20px; padding:1px 9px; margin-top:10px; }
+</style>
+</head>
+<body>
+  <h1>ThuleMail — выбери направление UI</h1>
+  <p class="sub">Кликни, чтобы открыть прототип. Список интерактивен — попробуй выбрать письма.</p>
+  <div class="cards">
+    <a class="card" href="01-apple-mail.html">
+      <div class="preview p1">✉️</div>
+      <div class="card-body">
+        <div class="card-title">1 · Apple Mail</div>
+        <div class="card-desc">Светлый, премиальный, воздушный. Translucent-сайдбар, синий акцент, крупная типографика темы.</div>
+        <span class="tag">чистота · macOS</span>
+      </div>
+    </a>
+    <a class="card" href="02-notion.html">
+      <div class="preview p2">📄</div>
+      <div class="card-body">
+        <div class="card-title">2 · Notion</div>
+        <div class="card-desc">Минимализм, эмодзи-иконки, мягкие серые блоки, письмо как «страница» со свойствами и метками.</div>
+        <span class="tag">минимализм · docs</span>
+      </div>
+    </a>
+    <a class="card" href="03-datagrip.html">
+      <div class="preview p3">🗂</div>
+      <div class="card-body">
+        <div class="card-title">3 · JetBrains DataGrip</div>
+        <div class="card-desc">Плотный тёмный IDE. Письма как строки data-grid с колонками, query-bar, статусбар, для power-user.</div>
+        <span class="tag">плотность · dark IDE</span>
+      </div>
+    </a>
+  </div>
+</body>
+</html>

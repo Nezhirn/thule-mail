@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+aiosqlite
+IMAPClient
+aiosmtplib
+cryptography
+python-jose[cryptography]
+python-multipart
+pytest
+pytest-asyncio
+httpx

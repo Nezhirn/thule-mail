@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThuleMail — прототип «Notion»</title>
+<style>
+  :root {
+    --bg-sidebar: #fbfbfa;
+    --bg-main: #ffffff;
+    --text: #37352f;
+    --text-secondary: #787774;
+    --text-tertiary: #9b9a97;
+    --hover: rgba(55,53,47,0.06);
+    --hover-strong: rgba(55,53,47,0.09);
+    --border: #ededec;
+    --accent: #2383e2;
+    --selected: rgba(35,131,226,0.07);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, sans-serif;
+    color: var(--text); background: var(--bg-main);
+    font-size: 14px; line-height: 1.5; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { display: grid; grid-template-columns: 240px 380px 1fr; height: 100vh; }
+
+  /* ── Sidebar ───────────────────────────── */
+  .sidebar { background: var(--bg-sidebar); border-right: 1px solid var(--border);
+    padding: 10px 8px; display: flex; flex-direction: column; overflow-y: auto; }
+  .workspace { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; cursor: pointer; margin-bottom: 6px; }
+  .workspace:hover { background: var(--hover); }
+  .ws-avatar { width: 22px; height: 22px; border-radius: 5px; background: #37352f; color: white;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+  .ws-name { font-weight: 600; font-size: 14px; }
+  .ws-chevron { margin-left: auto; color: var(--text-tertiary); font-size: 11px; }
+
+  .new-btn { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px;
+    color: var(--text-secondary); cursor: pointer; font-size: 14px; margin-bottom: 10px; }
+  .new-btn:hover { background: var(--hover); }
+
+  .item { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 5px;
+    color: var(--text-secondary); cursor: pointer; font-size: 14px; user-select: none; }
+  .item:hover { background: var(--hover); }
+  .item.active { background: var(--hover-strong); color: var(--text); font-weight: 500; }
+  .item .ic { width: 18px; text-align: center; font-size: 15px; opacity: .9; }
+  .item .ct { margin-left: auto; color: var(--text-tertiary); font-size: 12px; }
+
+  .group-head { display: flex; align-items: center; gap: 6px; padding: 16px 8px 4px;
+    font-size: 12px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .03em; cursor: pointer; }
+  .group-head .tw { font-size: 9px; transition: transform .15s; }
+  .acc-emoji { font-size: 14px; }
+  .nested { margin-left: 10px; border-left: 1px solid var(--border); padding-left: 6px; }
+
+  .sb-foot { margin-top: auto; padding-top: 8px; }
+
+  /* ── List ──────────────────────────────── */
+  .list { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .list-top { padding: 20px 24px 12px; }
+  .breadcrumb { font-size: 12.5px; color: var(--text-tertiary); margin-bottom: 8px; }
+  .list-h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+  .list-meta { font-size: 13px; color: var(--text-tertiary); margin-top: 6px; display: flex; gap: 14px; }
+  .list-meta span { display: flex; align-items: center; gap: 5px; }
+  .search { margin: 14px 24px 6px; display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text-tertiary); font-size: 13.5px; }
+  .search input { border: none; outline: none; background: none; flex: 1; font: inherit; color: var(--text); }
+
+  .rows { overflow-y: auto; flex: 1; padding: 4px 12px 12px; }
+  .row { display: flex; align-items: flex-start; gap: 11px; padding: 10px 12px; border-radius: 6px;
+    cursor: pointer; transition: background .08s; }
+  .row:hover { background: var(--hover); }
+  .row.active { background: var(--selected); }
+  .row-check { width: 16px; height: 16px; border: 1.5px solid var(--text-tertiary); border-radius: 4px; flex: none; margin-top: 2px; opacity: 0; transition: opacity .1s; }
+  .row:hover .row-check { opacity: .6; }
+  .row-emoji { font-size: 17px; flex: none; margin-top: 1px; }
+  .row-body { flex: 1; min-width: 0; }
+  .row-line1 { display: flex; align-items: baseline; gap: 8px; }
+  .row-from { font-weight: 600; font-size: 14px; color: var(--text); }
+  .row-from.read { font-weight: 400; color: var(--text-secondary); }
+  .row-date { margin-left: auto; font-size: 12px; color: var(--text-tertiary); flex: none; }
+  .row-subj { font-size: 13.5px; color: var(--text); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-snip { font-size: 13px; color: var(--text-tertiary); margin-top: 2px;
+    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .pills { display: flex; gap: 6px; margin-top: 7px; }
+  .pill { font-size: 12px; padding: 1px 8px; border-radius: 4px; font-weight: 500; }
+  .pill.work { background: #ddedea; color: #2c6e5d; }
+  .pill.trip { background: #e8deee; color: #6940a5; }
+  .pill.sub  { background: #fbecdd; color: #b25e09; }
+  .pill.pers { background: #fde8e9; color: #c44; }
+
+  /* ── Reading ───────────────────────────── */
+  .reading { display: flex; flex-direction: column; overflow: hidden; }
+  .r-top { display: flex; align-items: center; gap: 4px; padding: 12px 18px; color: var(--text-tertiary); }
+  .r-btn { padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 13px; display:flex; align-items:center; gap:6px; }
+  .r-btn:hover { background: var(--hover); color: var(--text); }
+  .r-body { overflow-y: auto; flex: 1; padding: 8px 96px 60px; }
+  .r-body-inner { max-width: 720px; margin: 0 auto; }
+  .r-emoji { font-size: 46px; margin-bottom: 6px; }
+  .r-title { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 20px; }
+  .props { display: flex; flex-direction: column; gap: 8px; margin-bottom: 26px;
+    padding-bottom: 22px; border-bottom: 1px solid var(--border); }
+  .prop { display: flex; align-items: center; gap: 12px; font-size: 13.5px; }
+  .prop-key { width: 110px; color: var(--text-tertiary); display: flex; align-items: center; gap: 7px; }
+  .prop-val { color: var(--text); }
+  .prop-tag { background: #e8deee; color: #6940a5; padding: 1px 8px; border-radius: 4px; font-size: 12.5px; font-weight: 500; }
+  .mini-avatar { width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(135deg,#2383e2,#7eb8f0);
+    color: white; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; }
+  .callout { display: flex; gap: 10px; background: #faf3dd; border-radius: 6px; padding: 14px 16px; margin: 18px 0; font-size: 14px; align-items: center; }
+  .callout button { margin-left: auto; background: white; border: 1px solid #e3d9b0; padding: 5px 12px; border-radius: 5px; cursor: pointer; font: inherit; font-size: 13px; color: #7a6720; }
+  .r-content { font-size: 15.5px; line-height: 1.7; color: #37352f; }
+  .r-content p { margin-bottom: 14px; }
+  .r-content a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .files { display: flex; flex-direction: column; gap: 4px; margin-top: 28px; }
+  .file { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+  .file:hover { background: var(--hover); }
+  .file-ic { font-size: 18px; }
+  .file-name { font-size: 14px; }
+  .file-size { margin-left: auto; font-size: 12px; color: var(--text-tertiary); }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(55,53,47,0.18); border-radius: 6px; border: 3px solid transparent; background-clip: padding-box; }
+  .style-badge { position: fixed; bottom: 14px; right: 16px; background: #37352f; color: white;
+    padding: 6px 12px; border-radius: 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="workspace"><div class="ws-avatar">A</div><div class="ws-name">Андрей</div><div class="ws-chevron">⌄</div></div>
+    <div class="new-btn">✏️ Написать письмо</div>
+
+    <div class="item active"><span class="ic">⭐</span> Объединённый входящий <span class="ct">24</span></div>
+    <div class="item"><span class="ic">🚩</span> С флажком <span class="ct">3</span></div>
+    <div class="item"><span class="ic">📝</span> Черновики <span class="ct">1</span></div>
+    <div class="item"><span class="ic">🕓</span> Отложенные</div>
+
+    <div class="group-head"><span class="tw">▼</span><span class="acc-emoji">🔵</span> Личная почта</div>
+    <div class="nested">
+      <div class="item"><span class="ic">📨</span> Входящие <span class="ct">12</span></div>
+      <div class="item"><span class="ic">⭐</span> Важное</div>
+      <div class="item"><span class="ic">📤</span> Отправленные</div>
+      <div class="item"><span class="ic">🗑</span> Корзина</div>
+    </div>
+
+    <div class="group-head"><span class="tw">▼</span><span class="acc-emoji">🟢</span> Рабочая почта</div>
+    <div class="nested">
+      <div class="item"><span class="ic">📨</span> Входящие <span class="ct">12</span></div>
+      <div class="item"><span class="ic">📤</span> Отправленные</div>
+    </div>
+
+    <div class="group-head"><span class="tw" style="transform:rotate(-90deg)">▼</span><span class="acc-emoji">🟠</span> Рассылки</div>
+
+    <div class="sb-foot">
+      <div class="item"><span class="ic">⚙️</span> Настройки аккаунтов</div>
+      <div class="item"><span class="ic">🎨</span> Оформление</div>
+    </div>
+  </aside>
+
+  <section class="list">
+    <div class="list-top">
+      <div class="breadcrumb">Почта / Объединённый входящий</div>
+      <div class="list-h1"><span>⭐</span> Объединённый входящий</div>
+      <div class="list-meta"><span>📬 24 непрочитанных</span><span>👥 3 аккаунта</span></div>
+    </div>
+    <div class="search">🔍 <input placeholder="Искать или фильтровать…"></div>
+    <div class="rows" id="rows"></div>
+  </section>
+
+  <section class="reading">
+    <div class="r-top">
+      <div class="r-btn">↩️ Ответить</div>
+      <div class="r-btn">↪️ Переслать</div>
+      <div class="r-btn">🗄 Архив</div>
+      <div class="r-btn" style="margin-left:auto">⋯</div>
+    </div>
+    <div class="r-body">
+      <div class="r-body-inner">
+        <div class="r-emoji">✈️</div>
+        <div class="r-title" id="r-title">Подтверждение бронирования № 48-1203</div>
+        <div class="props">
+          <div class="prop"><div class="prop-key">👤 От</div><div class="prop-val"><span class="mini-avatar">B</span> Booking.com &lt;noreply@booking.com&gt;</div></div>
+          <div class="prop"><div class="prop-key">📥 Аккаунт</div><div class="prop-val">🔵 Личная почта</div></div>
+          <div class="prop"><div class="prop-key">🏷 Метки</div><div class="prop-val"><span class="prop-tag">Поездки</span></div></div>
+          <div class="prop"><div class="prop-key">🕐 Дата</div><div class="prop-val">13 июня 2026, 14:32</div></div>
+        </div>
+        <div class="callout">🖼 Внешние изображения скрыты для приватности.<button>Показать</button></div>
+        <div class="r-content">
+          <p>Здравствуйте, Андрей!</p>
+          <p>Спасибо за бронирование. Мы рады подтвердить ваше размещение в отеле <b>«Северное сияние»</b> с 18 по 22 июня. Номер бронирования: <a href="#">48-1203</a>.</p>
+          <p>Заселение возможно с 14:00, выезд до 12:00. Если планы изменятся, бесплатная отмена доступна до 17 июня включительно.</p>
+          <p>Хорошего путешествия!<br>Команда Booking.com</p>
+        </div>
+        <div class="files">
+          <div class="file"><span class="file-ic">📄</span><span class="file-name">Ваучер.pdf</span><span class="file-size">248 КБ</span></div>
+          <div class="file"><span class="file-ic">🗺</span><span class="file-name">Карта проезда.png</span><span class="file-size">1,2 МБ</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="style-badge">Стиль 2 — Notion</div>
+
+<script>
+  const data = [
+    { emoji:'✈️', from:'Booking.com', subj:'Подтверждение бронирования № 48-1203', snip:'Спасибо за бронирование. Подтверждаем размещение в отеле «Северное сияние».', date:'14:32', unread:true, pill:'trip', pname:'Поездки' },
+    { emoji:'🎨', from:'Анна Ковалёва', subj:'Re: Дизайн-макеты к пятнице', snip:'Посмотрела последнюю версию — выглядит отлично, осталось поправить отступы.', date:'13:05', unread:true, pill:'work', pname:'Работа' },
+    { emoji:'🐙', from:'GitHub', subj:'[thulemail] PR #42 готов к ревью', snip:'andrew-dev запросил ваше ревью. 14 файлов изменено, +820 −96.', date:'11:48', unread:true, pill:'work', pname:'Работа' },
+    { emoji:'🎭', from:'Яндекс.Афиша', subj:'Концерты этой недели', snip:'Джазовый вечер в субботу, выставка современного искусства и ещё 6 событий.', date:'10:20', unread:false, pill:'sub', pname:'Рассылки' },
+    { emoji:'📑', from:'Дмитрий Соколов', subj:'Договор на подпись', snip:'Высылаю финальную версию договора, прошу проверить реквизиты.', date:'Вчера', unread:false, pill:'work', pname:'Работа' },
+    { emoji:'🧾', from:'Apple', subj:'Ваш чек от App Store', snip:'Подписка iCloud+ 200 ГБ продлена. Сумма: 149 ₽.', date:'Вчера', unread:false, pill:null },
+    { emoji:'📸', from:'Мария П.', subj:'Фото с выходных', snip:'Скинула все фотографии с пикника! Закатные кадры вышли особенно классно.', date:'11 июн', unread:false, pill:'pers', pname:'Личное' },
+    { emoji:'💼', from:'LinkedIn', subj:'5 новых вакансий по профилю', snip:'Frontend в Notion, Product Engineer в Linear и ещё 3 позиции.', date:'10 июн', unread:false, pill:null },
+  ];
+  const box = document.getElementById('rows');
+  box.innerHTML = data.map((m,i)=>`
+    <div class="row ${i===0?'active':''}" data-i="${i}">
+      <div class="row-check"></div>
+      <div class="row-emoji">${m.emoji}</div>
+      <div class="row-body">
+        <div class="row-line1"><span class="row-from ${m.unread?'':'read'}">${m.from}</span><span class="row-date">${m.date}</span></div>
+        <div class="row-subj">${m.subj}</div>
+        <div class="row-snip">${m.snip}</div>
+        ${m.pill?`<div class="pills"><span class="pill ${m.pill}">${m.pname}</span></div>`:''}
+      </div>
+    </div>`).join('');
+  box.addEventListener('click', e=>{
+    const el=e.target.closest('.row'); if(!el) return;
+    document.querySelectorAll('.row').forEach(x=>x.classList.remove('active'));
+    el.classList.add('active');
+    const m=data[el.dataset.i];
+    document.getElementById('r-title').textContent=m.subj;
+    document.querySelector('.r-emoji').textContent=m.emoji;
+  });
+</script>
+</body>
+</html>

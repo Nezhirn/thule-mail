@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThuleMail — прототип «JetBrains DataGrip»</title>
+<style>
+  :root {
+    --bg: #2b2d30;            /* основной фон */
+    --bg-tool: #2b2d30;       /* тулвиндоу */
+    --bg-editor: #1e1f22;     /* «редактор» / reading */
+    --bg-header: #393b40;     /* шапки таблиц */
+    --bg-row-alt: #2f3133;
+    --bg-selected: #2e436e;   /* выделение строки (синий JB) */
+    --bg-hover: #34363b;
+    --text: #dfe1e5;
+    --text-dim: #9da0a8;
+    --text-faint: #6f737a;
+    --border: #1e1f22;
+    --border-soft: #393b40;
+    --accent: #3574f0;        /* JB blue */
+    --green: #5fb865;
+    --orange: #d9904b;
+    --purple: #b07fdb;
+    --red: #e05555;
+    --unread: #3574f0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    font-size: 13px; overflow: hidden; -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; }
+
+  /* top toolbar (IDE-like) */
+  .toolbar { height: 34px; background: var(--bg-tool); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 2px; padding: 0 8px; }
+  .tb-title { font-size: 12.5px; color: var(--text-dim); margin-right: 14px; }
+  .tb-title b { color: var(--text); }
+  .tb-btn { width: 28px; height: 24px; display: flex; align-items: center; justify-content: center;
+    border-radius: 5px; color: var(--text-dim); cursor: pointer; font-size: 14px; }
+  .tb-btn:hover { background: var(--bg-hover); color: var(--text); }
+  .tb-sep { width: 1px; height: 18px; background: var(--border-soft); margin: 0 6px; }
+  .tb-run { display: flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 5px;
+    color: var(--green); cursor: pointer; font-size: 12.5px; }
+  .tb-run:hover { background: var(--bg-hover); }
+
+  .app { display: grid; grid-template-columns: 230px 1fr; height: calc(100vh - 34px); }
+
+  /* ── Tool window (left) ────────────────── */
+  .tool { background: var(--bg-tool); border-right: 1px solid var(--border); overflow-y: auto; padding: 4px 0; }
+  .tool-head { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text-faint); padding: 8px 12px 4px; }
+  .tnode { display: flex; align-items: center; gap: 6px; padding: 3px 12px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  .tnode:hover { background: var(--bg-hover); }
+  .tnode.sel { background: var(--bg-selected); }
+  .tw { width: 12px; text-align: center; color: var(--text-faint); font-size: 9px; }
+  .tnode .ic { width: 16px; text-align: center; font-size: 13px; }
+  .tnode .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .tnode .badge { color: var(--text-faint); font-size: 11.5px; }
+  .tnode.sel .badge { color: #cbd5ec; }
+  .indent { padding-left: 26px; }
+  .indent2 { padding-left: 40px; }
+  .sq { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+  /* ── Right (editor area) ───────────────── */
+  .editor { display: flex; flex-direction: column; overflow: hidden; }
+  /* tabs */
+  .tabs { display: flex; background: var(--bg); border-bottom: 1px solid var(--border); height: 30px; }
+  .tab { display: flex; align-items: center; gap: 7px; padding: 0 14px; font-size: 12.5px; color: var(--text-dim);
+    border-right: 1px solid var(--border); cursor: pointer; }
+  .tab.active { background: var(--bg-editor); color: var(--text); box-shadow: inset 0 2px 0 var(--accent); }
+  .tab .x { color: var(--text-faint); font-size: 13px; }
+
+  /* query bar */
+  .qbar { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--bg-editor);
+    border-bottom: 1px solid var(--border); }
+  .qbar .prompt { color: var(--green); }
+  .qbar input { flex: 1; background: transparent; border: none; outline: none; color: var(--text);
+    font-family: "JetBrains Mono", monospace; font-size: 12.5px; }
+  .qbar .filter-chip { font-size: 11.5px; color: var(--text-dim); background: var(--bg-header);
+    padding: 2px 8px; border-radius: 4px; }
+
+  /* split: grid + reading */
+  .split { display: grid; grid-template-rows: 1fr 1fr; flex: 1; overflow: hidden; }
+
+  /* data grid */
+  .grid-wrap { overflow: auto; background: var(--bg-editor); }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  thead th { position: sticky; top: 0; background: var(--bg-header); color: var(--text-dim);
+    text-align: left; font-weight: 500; padding: 5px 10px; border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 11.5px; }
+  thead th .sort { color: var(--text-faint); margin-left: 4px; font-size: 9px; }
+  tbody td { padding: 4px 10px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border-soft);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+  tbody tr { cursor: pointer; }
+  tbody tr:nth-child(even) { background: var(--bg-row-alt); }
+  tbody tr:hover { background: var(--bg-hover); }
+  tbody tr.sel { background: var(--bg-selected) !important; }
+  .gutter { width: 38px; color: var(--text-faint); text-align: right; padding-right: 8px !important;
+    background: var(--bg-header); font-family: "JetBrains Mono", monospace; font-size: 11px; }
+  .c-unread { width: 14px; text-align: center; }
+  .udot { width: 6px; height: 6px; border-radius: 50%; background: var(--unread); display: inline-block; }
+  .acc-sq { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: middle; }
+  .col-from { width: 180px; max-width: 180px !important; font-weight: 500; }
+  .col-from.read { font-weight: 400; color: var(--text-dim); }
+  .col-subj { color: var(--text); }
+  .col-subj .snip { color: var(--text-faint); }
+  .col-date { width: 120px; max-width: 120px !important; color: var(--text-dim); font-family: "JetBrains Mono", monospace; font-size: 11.5px; }
+  .col-size { width: 70px; max-width: 70px !important; color: var(--text-faint); text-align: right; font-family: "JetBrains Mono", monospace; font-size: 11.5px; }
+  .flag { color: var(--orange); }
+  .att { color: var(--text-faint); }
+  .lbl-tag { font-size: 10.5px; padding: 0 6px; border-radius: 3px; margin-right: 4px; }
+  .t-work { background: rgba(95,184,101,.18); color: var(--green); }
+  .t-trip { background: rgba(176,127,219,.18); color: var(--purple); }
+  .t-sub  { background: rgba(217,144,75,.18); color: var(--orange); }
+
+  /* reading pane (bottom) */
+  .reading { background: var(--bg-editor); border-top: 1px solid var(--border); overflow-y: auto; }
+  .r-head { padding: 12px 16px 10px; border-bottom: 1px solid var(--border-soft); }
+  .r-subj { font-size: 16px; font-weight: 600; }
+  .r-fields { margin-top: 8px; display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 12.5px; }
+  .r-fields .k { color: var(--text-faint); font-family: "JetBrains Mono", monospace; font-size: 11.5px; }
+  .r-fields .v { color: var(--text); }
+  .r-actions { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--border-soft); }
+  .ra { padding: 4px 10px; border: 1px solid var(--border-soft); border-radius: 5px; color: var(--text-dim);
+    cursor: pointer; font-size: 12px; background: var(--bg-header); }
+  .ra:hover { color: var(--text); border-color: var(--accent); }
+  .imgwarn { display: flex; align-items: center; gap: 10px; margin: 12px 16px; background: rgba(217,144,75,.1);
+    border: 1px solid rgba(217,144,75,.35); border-radius: 5px; padding: 8px 12px; font-size: 12.5px; color: var(--orange); }
+  .imgwarn button { margin-left: auto; background: var(--bg-header); border: 1px solid var(--border-soft);
+    color: var(--text); padding: 4px 10px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 12px; }
+  .r-content { padding: 4px 16px 20px; font-size: 13.5px; line-height: 1.6; color: #c9ccd2; max-width: 760px; }
+  .r-content p { margin-bottom: 12px; }
+  .r-content a { color: var(--accent); text-decoration: none; }
+  .att-bar { display: flex; gap: 8px; padding: 0 16px 18px; }
+  .att-chip { display: flex; align-items: center; gap: 7px; background: var(--bg-header); border: 1px solid var(--border-soft);
+    border-radius: 5px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .att-chip:hover { border-color: var(--accent); }
+
+  /* status bar */
+  .statusbar { height: 22px; background: var(--bg-tool); border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; padding: 0 12px; font-size: 11.5px; color: var(--text-faint);
+    font-family: "JetBrains Mono", monospace; }
+
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-thumb { background: #4b4d52; border-radius: 6px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #5a5c62; }
+  .style-badge { position: fixed; bottom: 28px; right: 16px; background: var(--accent); color: white;
+    padding: 5px 11px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <span class="tb-title">ThuleMail — <b>Объединённый входящий</b></span>
+    <div class="tb-run">▶ Синхронизировать</div>
+    <div class="tb-sep"></div>
+    <div class="tb-btn" title="Обновить">⟳</div>
+    <div class="tb-btn" title="Фильтр">⚲</div>
+    <div class="tb-btn" title="Колонки">▦</div>
+    <div class="tb-btn" title="Группировка">≣</div>
+    <div style="flex:1"></div>
+    <div class="tb-btn">⚙</div>
+  </div>
+
+  <div class="app">
+    <!-- tool window -->
+    <aside class="tool">
+      <div class="tool-head">Ящики</div>
+      <div class="tnode sel"><span class="tw">▾</span><span class="ic">★</span><span class="lbl">Объединённый входящий</span><span class="badge">24</span></div>
+      <div class="tnode"><span class="tw"></span><span class="ic">🚩</span><span class="lbl">С флажком</span><span class="badge">3</span></div>
+
+      <div class="tnode"><span class="tw">▾</span><span class="sq" style="background:#3574f0"></span><span class="lbl" style="font-weight:500">personal@gmail.com</span></div>
+      <div class="tnode indent"><span class="ic">📥</span><span class="lbl">INBOX</span><span class="badge">12</span></div>
+      <div class="tnode indent"><span class="ic">★</span><span class="lbl">Важное</span></div>
+      <div class="tnode indent"><span class="ic">📤</span><span class="lbl">Отправленные</span></div>
+      <div class="tnode indent"><span class="ic">🗑</span><span class="lbl">Корзина</span></div>
+
+      <div class="tnode"><span class="tw">▾</span><span class="sq" style="background:#5fb865"></span><span class="lbl" style="font-weight:500">work@company.com</span></div>
+      <div class="tnode indent"><span class="ic">📥</span><span class="lbl">INBOX</span><span class="badge">12</span></div>
+      <div class="tnode indent"><span class="ic">📤</span><span class="lbl">Отправленные</span></div>
+
+      <div class="tnode"><span class="tw">▸</span><span class="sq" style="background:#d9904b"></span><span class="lbl" style="font-weight:500">news@yandex.ru</span></div>
+
+      <div class="tool-head" style="margin-top:8px">Сохранённые фильтры</div>
+      <div class="tnode"><span class="tw"></span><span class="ic">🔖</span><span class="lbl">UNSEEN от людей</span></div>
+      <div class="tnode"><span class="tw"></span><span class="ic">🔖</span><span class="lbl">С вложениями &gt; 1 МБ</span></div>
+    </aside>
+
+    <!-- editor -->
+    <div class="editor">
+      <div class="tabs">
+        <div class="tab active">★ Объединённый входящий <span class="x">×</span></div>
+        <div class="tab">📥 work · INBOX <span class="x">×</span></div>
+      </div>
+
+      <div class="qbar">
+        <span class="prompt mono">⌕</span>
+        <input class="mono" value="folder IN ('INBOX') AND seen = false ORDER BY date DESC" spellcheck="false">
+        <span class="filter-chip">scope: all</span>
+        <span class="filter-chip">8 строк</span>
+      </div>
+
+      <div class="split">
+        <div class="grid-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="gutter">#</th>
+                <th class="c-unread"></th>
+                <th class="col-from">От <span class="sort">▼</span></th>
+                <th class="col-subj">Тема</th>
+                <th>Метки</th>
+                <th class="col-date">Дата <span class="sort">▼</span></th>
+                <th class="col-size">Размер</th>
+              </tr>
+            </thead>
+            <tbody id="grid"></tbody>
+          </table>
+        </div>
+
+        <div class="reading">
+          <div class="r-head">
+            <div class="r-subj" id="r-subj">Подтверждение бронирования № 48-1203</div>
+            <div class="r-fields">
+              <span class="k">FROM</span><span class="v">Booking.com &lt;noreply@booking.com&gt;</span>
+              <span class="k">TO</span><span class="v">rustein.usa@gmail.com</span>
+              <span class="k">ACCOUNT</span><span class="v"><span class="acc-sq" style="background:#3574f0"></span>personal@gmail.com</span>
+              <span class="k">DATE</span><span class="v mono">2026-06-13 14:32:05 +0300</span>
+            </div>
+          </div>
+          <div class="r-actions">
+            <div class="ra">↩ Ответить</div>
+            <div class="ra">↩↩ Всем</div>
+            <div class="ra">↪ Переслать</div>
+            <div class="ra">🗄 Архив</div>
+            <div class="ra">🗑 Удалить</div>
+            <div class="ra">🚩 Флажок</div>
+          </div>
+          <div class="imgwarn">⚠ Внешние изображения заблокированы.<button>Загрузить изображения</button></div>
+          <div class="r-content">
+            <p>Здравствуйте, Андрей!</p>
+            <p>Спасибо за бронирование. Подтверждаем размещение в отеле <b>«Северное сияние»</b> с 18 по 22 июня. Номер бронирования: <a href="#">48-1203</a>.</p>
+            <p>Заселение с 14:00, выезд до 12:00. Бесплатная отмена — до 17 июня включительно.</p>
+            <p>Команда Booking.com</p>
+          </div>
+          <div class="att-bar">
+            <div class="att-chip">📄 Ваучер.pdf · 248 КБ</div>
+            <div class="att-chip">🗺 Карта.png · 1,2 МБ</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="statusbar">
+        <span>UTF-8</span><span>IMAP: connected (3 pool)</span><span>last sync: 12s ago</span><span style="margin-left:auto">8 of 1 247 messages</span>
+      </div>
+    </div>
+  </div>
+  <div class="style-badge">Стиль 3 — JetBrains DataGrip</div>
+
+<script>
+  const data = [
+    { from:'Booking.com', subj:'Подтверждение бронирования № 48-1203', snip:'  — Подтверждаем размещение в отеле…', date:'2026-06-13 14:32', size:'18 КБ', unread:true, acc:'#3574f0', tag:'t-trip', tname:'Поездки', att:true, flag:false },
+    { from:'Анна Ковалёва', subj:'Re: Дизайн-макеты к пятнице', snip:'  — Выглядит отлично, осталось отступы…', date:'2026-06-13 13:05', size:'7 КБ', unread:true, acc:'#5fb865', tag:'t-work', tname:'Работа', att:false, flag:true },
+    { from:'GitHub', subj:'[thulemail] PR #42 готов к ревью', snip:'  — 14 файлов, +820 −96', date:'2026-06-13 11:48', size:'12 КБ', unread:true, acc:'#5fb865', tag:'t-work', tname:'Работа', att:false, flag:false },
+    { from:'Яндекс.Афиша', subj:'Концерты этой недели', snip:'  — Джаз в субботу и ещё 6 событий', date:'2026-06-13 10:20', size:'44 КБ', unread:false, acc:'#3574f0', tag:'t-sub', tname:'Рассылки', att:false, flag:false },
+    { from:'Дмитрий Соколов', subj:'Договор на подпись', snip:'  — Финальная версия, проверьте реквизиты', date:'2026-06-12 18:02', size:'320 КБ', unread:false, acc:'#5fb865', tag:'t-work', tname:'Работа', att:true, flag:false },
+    { from:'Apple', subj:'Ваш чек от App Store', snip:'  — iCloud+ 200 ГБ · 149 ₽', date:'2026-06-12 09:14', size:'9 КБ', unread:false, acc:'#3574f0', tag:null, att:false, flag:false },
+    { from:'Мария П.', subj:'Фото с выходных', snip:'  — Скинула все фотографии с пикника', date:'2026-06-11 21:40', size:'4,8 МБ', unread:false, acc:'#3574f0', tag:null, att:true, flag:false },
+    { from:'LinkedIn', subj:'5 новых вакансий по профилю', snip:'  — Notion, Linear и ещё 3 позиции', date:'2026-06-10 08:30', size:'31 КБ', unread:false, acc:'#5fb865', tag:null, att:false, flag:false },
+  ];
+  const g = document.getElementById('grid');
+  g.innerHTML = data.map((m,i)=>`
+    <tr class="${i===0?'sel':''}" data-i="${i}">
+      <td class="gutter">${i+1}</td>
+      <td class="c-unread">${m.unread?'<span class="udot"></span>':''}</td>
+      <td class="col-from ${m.unread?'':'read'}"><span class="acc-sq" style="background:${m.acc}"></span>${m.from}</td>
+      <td class="col-subj">${m.flag?'<span class="flag">⚑ </span>':''}${m.att?'<span class="att">📎 </span>':''}${m.subj}<span class="snip">${m.snip}</span></td>
+      <td>${m.tag?`<span class="lbl-tag ${m.tag}">${m.tname}</span>`:''}</td>
+      <td class="col-date">${m.date}</td>
+      <td class="col-size">${m.size}</td>
+    </tr>`).join('');
+  g.addEventListener('click', e=>{
+    const tr=e.target.closest('tr'); if(!tr) return;
+    document.querySelectorAll('#grid tr').forEach(x=>x.classList.remove('sel'));
+    tr.classList.add('sel');
+    document.getElementById('r-subj').textContent = data[tr.dataset.i].subj;
+  });
+</script>
+</body>
+</html>
