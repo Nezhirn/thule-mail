@@ -1,11 +1,15 @@
 """Отправка писем."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.schemas.send import SendRequest, SendResult
 from app.security.auth import current_session
 from app.services import smtp as smtp_svc
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/accounts/{account_id}",
@@ -32,6 +36,8 @@ async def send(account_id: int, body: SendRequest) -> SendResult:
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
+        logger.warning("send from account %s: %s", account_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ошибка отправки: {exc}"
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось отправить письмо",
         ) from exc

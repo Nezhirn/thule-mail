@@ -8,8 +8,10 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from app.db.database import get_db
@@ -23,6 +25,10 @@ from app.imap.pool import ImapPool, pool_manager
 from app.services.accounts import connection_params_from_row, get_account_row
 
 logger = logging.getLogger(__name__)
+
+# Блокировки на (account_id, folder): фоновый поллинг и ручной sync не должны
+# синхронизировать одну папку одновременно (гонки на sync_state/кэше).
+_sync_locks: dict[tuple[int, str], asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 async def _get_pool(account_id: int) -> tuple[ImapPool, ConnectionParams]:
@@ -74,13 +80,18 @@ def _flags_to_str(flags) -> str:
 
 
 async def sync_folder(account_id: int, folder: str, limit: int = 100) -> dict:
-    """Синхронизировать одну папку. Возвращает сводку (сколько новых).
+    """Синхронизировать одну папку (под per-folder lock).
 
     Вся последовательность SELECT→SEARCH→FETCH идёт на ОДНОМ соединении
     (pool.session), иначе FETCH/SEARCH попадут на невыбранное соединение.
+    Lock не даёт фоновому поллингу и ручному sync конкурировать за одну папку.
     """
     pool, _ = await _get_pool(account_id)
+    async with _sync_locks[(account_id, folder)]:
+        return await _sync_folder_locked(pool, account_id, folder, limit)
 
+
+async def _sync_folder_locked(pool: ImapPool, account_id: int, folder: str, limit: int) -> dict:
     async with pool.session() as run:
         # 1. Выбрать папку (readonly — не трогаем \\Seen) и узнать UIDVALIDITY.
         info = await run(imap_client.select_folder, folder, True)

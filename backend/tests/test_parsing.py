@@ -43,6 +43,20 @@ def test_make_snippet_collapses_whitespace():
     assert len(make_snippet("a" * 500, length=200)) == 200
 
 
+def test_make_snippet_converts_html_to_text():
+    html = """
+    <!doctype html>
+    <html>
+      <head><style>.hidden { display: none; }</style></head>
+      <body>
+        <p>Новое&nbsp;сообщение</p>
+        <div>от работодателя</div>
+      </body>
+    </html>
+    """
+    assert make_snippet(html, length=100) == "Новое сообщение от работодателя"
+
+
 def test_parse_full_message_cyrillic_html_and_attachment():
     msg = EmailMessage()
     msg["Subject"] = "Тема письма"

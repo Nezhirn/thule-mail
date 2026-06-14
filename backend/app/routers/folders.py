@@ -1,12 +1,16 @@
 """Папки аккаунта и слой кастомизации (порядок/pin/hide/алиасы)."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.db.database import get_db
 from app.schemas.message import FolderLayoutUpdate
 from app.security.auth import current_session
 from app.services import messages as svc
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/accounts/{account_id}/folders",
@@ -22,8 +26,10 @@ async def get_folders(account_id: int) -> list[dict]:
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
+        logger.warning("list_folders %s: %s", account_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ошибка получения папок: {exc}"
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось получить список папок",
         ) from exc
 
 

@@ -14,10 +14,23 @@ from app.services.sync import _get_pool
 logger = logging.getLogger(__name__)
 
 
+def _split_flags(value: str | None) -> list[str]:
+    return (value or "").split()
+
+
+def _flag_state(flags: list[str]) -> dict:
+    return {
+        "flags": flags,
+        "seen": "\\Seen" in flags,
+        "flagged": "\\Flagged" in flags,
+        "answered": "\\Answered" in flags,
+    }
+
+
 def _row_to_message(row) -> dict:
     d = dict(row)
     envelope = json.loads(d.pop("envelope_json"))
-    flags = d.get("flags", "").split()
+    flags = _split_flags(d.get("flags"))
     return {
         "account_id": d["account_id"],
         "folder": d["folder"],
@@ -27,11 +40,8 @@ def _row_to_message(row) -> dict:
         "to": envelope.get("to", []),
         "date": envelope.get("date") or d.get("internaldate"),
         "internaldate": d.get("internaldate"),
-        "snippet": d.get("snippet", ""),
-        "flags": flags,
-        "seen": "\\Seen" in flags,
-        "flagged": "\\Flagged" in flags,
-        "answered": "\\Answered" in flags,
+        "snippet": make_snippet(d.get("snippet", "")),
+        **_flag_state(flags),
         "has_attachments": bool(d.get("has_attachments")),
         "size": d.get("size", 0),
     }
@@ -89,12 +99,26 @@ async def get_message(account_id: int, folder: str, uid: int, mark_seen: bool = 
         # Флаг уже выставлен на сервере внутри сессии выше — обновим кэш.
         await _add_seen_in_cache(account_id, folder, uid)
 
+    flags = await _get_cached_flags(account_id, folder, uid)
+    if mark_seen and "\\Seen" not in flags:
+        flags = sorted({*flags, "\\Seen"})
+
     return {
         "account_id": account_id,
         "folder": folder,
         "uid": uid,
+        **_flag_state(flags),
         **parsed,
     }
+
+
+async def _get_cached_flags(account_id: int, folder: str, uid: int) -> list[str]:
+    db = get_db()
+    row = await db.fetchone(
+        "SELECT flags FROM messages_cache WHERE account_id = ? AND folder = ? AND uid = ?",
+        (account_id, folder, uid),
+    )
+    return _split_flags(row["flags"]) if row is not None else []
 
 
 async def _add_seen_in_cache(account_id: int, folder: str, uid: int) -> None:
@@ -112,6 +136,35 @@ async def _add_seen_in_cache(account_id: int, folder: str, uid: int) -> None:
         )
 
 
+async def _update_flags_in_cache(
+    account_id: int, folder: str, uids: list[int], flags: list[str], add: bool
+) -> None:
+    if not uids:
+        return
+    db = get_db()
+    placeholders = ",".join("?" for _ in uids)
+    rows = await db.fetchall(
+        f"""
+        SELECT uid, flags FROM messages_cache
+        WHERE account_id = ? AND folder = ? AND uid IN ({placeholders})
+        """,
+        (account_id, folder, *uids),
+    )
+    updates = []
+    for row in rows:
+        current = set(row["flags"].split())
+        if add:
+            current.update(flags)
+        else:
+            current.difference_update(flags)
+        updates.append((" ".join(sorted(current)), account_id, folder, row["uid"]))
+    if updates:
+        await db.executemany(
+            "UPDATE messages_cache SET flags = ? WHERE account_id = ? AND folder = ? AND uid = ?",
+            updates,
+        )
+
+
 async def set_flags(
     account_id: int, folder: str, uid: int, flags: list[str], add: bool
 ) -> None:
@@ -119,22 +172,20 @@ async def set_flags(
     async with pool.session() as run:
         await run(imap_client.select_folder, folder, False)  # RW
         await run(imap_client.set_flags, uid, flags, add)
-    # Обновим кэш.
-    db = get_db()
-    row = await db.fetchone(
-        "SELECT flags FROM messages_cache WHERE account_id = ? AND folder = ? AND uid = ?",
-        (account_id, folder, uid),
-    )
-    if row is not None:
-        current = set(row["flags"].split())
-        if add:
-            current.update(flags)
-        else:
-            current.difference_update(flags)
-        await db.execute(
-            "UPDATE messages_cache SET flags = ? WHERE account_id = ? AND folder = ? AND uid = ?",
-            (" ".join(sorted(current)), account_id, folder, uid),
-        )
+    await _update_flags_in_cache(account_id, folder, [uid], flags, add)
+
+
+async def set_flags_bulk(
+    account_id: int, folder: str, uids: list[int], flags: list[str], add: bool
+) -> int:
+    if not uids:
+        return 0
+    pool, _ = await _get_pool(account_id)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, False)  # RW
+        await run(imap_client.set_flags_bulk, uids, flags, add)
+    await _update_flags_in_cache(account_id, folder, uids, flags, add)
+    return len(uids)
 
 
 async def move_message(account_id: int, folder: str, uid: int, dest: str) -> None:
@@ -161,6 +212,25 @@ async def delete_message(account_id: int, folder: str, uid: int) -> None:
     )
 
 
+async def delete_messages_bulk(account_id: int, folder: str, uids: list[int]) -> int:
+    if not uids:
+        return 0
+    pool, _ = await _get_pool(account_id)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, False)
+        await run(imap_client.delete_messages_bulk, uids)
+    db = get_db()
+    placeholders = ",".join("?" for _ in uids)
+    await db.execute(
+        f"""
+        DELETE FROM messages_cache
+        WHERE account_id = ? AND folder = ? AND uid IN ({placeholders})
+        """,
+        (account_id, folder, *uids),
+    )
+    return len(uids)
+
+
 async def mark_all_read(account_id: int, folder: str) -> int:
     """Отметить все непрочитанные письма в папке как прочитанные.
 
@@ -180,6 +250,18 @@ async def mark_all_read(account_id: int, folder: str) -> int:
         (account_id, folder),
     )
     return len(unseen)
+
+
+async def mark_all_unread(account_id: int, folder: str) -> int:
+    """Отметить все прочитанные письма в папке как непрочитанные."""
+    pool, _ = await _get_pool(account_id)
+    async with pool.session() as run:
+        await run(imap_client.select_folder, folder, False)  # RW
+        seen = await run(imap_client.search_uids, "SEEN")
+        if seen:
+            await run(imap_client.set_flags_bulk, seen, ["\\Seen"], False)
+    await _update_flags_in_cache(account_id, folder, seen, ["\\Seen"], False)
+    return len(seen)
 
 
 async def get_attachment(account_id: int, folder: str, uid: int, part: str) -> bytes | None:

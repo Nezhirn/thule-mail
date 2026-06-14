@@ -20,11 +20,17 @@ _fernet: Fernet | None = None
 def _get_fernet() -> Fernet:
     global _fernet
     if _fernet is None:
-        key = get_settings().encryption_key.strip()
+        settings = get_settings()
+        key = settings.encryption_key.strip()
         if not key:
+            if settings.is_prod:
+                raise RuntimeError(
+                    "ENCRYPTION_KEY не задан. В production это обязательная переменная "
+                    "(иначе сохранённые учётки нельзя расшифровать). См. .env.example."
+                )
             key = Fernet.generate_key().decode()
             logger.warning(
-                "ENCRYPTION_KEY не задан — сгенерирован эфемерный ключ. "
+                "ENCRYPTION_KEY не задан — сгенерирован ЭФЕМЕРНЫЙ ключ (только dev). "
                 "Сохранённые учётки не переживут перезапуск. Задайте ENCRYPTION_KEY в .env."
             )
         _fernet = Fernet(key.encode() if isinstance(key, str) else key)

@@ -106,14 +106,26 @@ def set_flags(client: IMAPClient, uid: int, flags: list[str], add: bool) -> None
         client.remove_flags([uid], flags)
 
 
+# Размер батча UID в одной IMAP-команде. Длинный список UID, перечисленный
+# через запятую, может превысить лимит строки сервера (mail.ru: 16 КБ) и дать
+# «No LF found in first 16384 bytes». 500 UID ≈ 3 КБ — с большим запасом.
+_BULK_CHUNK = 500
+
+
+def _chunks(uids: list[int], size: int = _BULK_CHUNK):
+    for i in range(0, len(uids), size):
+        yield uids[i : i + size]
+
+
 def set_flags_bulk(client: IMAPClient, uids: list[int], flags: list[str], add: bool) -> None:
-    """Добавить/снять флаги для множества UID одной командой."""
+    """Добавить/снять флаги для множества UID (батчами, чтобы не превысить лимит строки)."""
     if not uids:
         return
-    if add:
-        client.add_flags(uids, flags)
-    else:
-        client.remove_flags(uids, flags)
+    for batch in _chunks(uids):
+        if add:
+            client.add_flags(batch, flags)
+        else:
+            client.remove_flags(batch, flags)
 
 
 def move_message(client: IMAPClient, uid: int, dest_folder: str) -> None:
@@ -128,4 +140,13 @@ def move_message(client: IMAPClient, uid: int, dest_folder: str) -> None:
 
 def delete_message(client: IMAPClient, uid: int) -> None:
     client.delete_messages([uid])
+    client.expunge()
+
+
+def delete_messages_bulk(client: IMAPClient, uids: list[int]) -> None:
+    """Удалить несколько писем (батчами, чтобы не превысить лимит строки сервера)."""
+    if not uids:
+        return
+    for batch in _chunks(uids):
+        client.delete_messages(batch)
     client.expunge()

@@ -1,0 +1,30 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-prod}
+      SECRET_KEY: ${SECRET_KEY:?Задайте SECRET_KEY в .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Задайте ENCRYPTION_KEY в .env}
+      APP_USER: ${APP_USER:?Задайте APP_USER в .env}
+      APP_PASSWORD: ${APP_PASSWORD:?Задайте APP_PASSWORD в .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      DATABASE_PATH: /app/data/thulemail.db
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-60}
+    volumes:
+      - thulemail-data:/app/data
+    # Порт наружу НЕ публикуем — доступ только через frontend-nginx.
+    expose:
+      - "8000"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  thulemail-data:

@@ -1,16 +1,24 @@
 """Эндпоинты писем: список из кэша, одно письмо, флаги, move/delete, sync.
 
 Папка передаётся query-параметром (base64url), не сегментом пути.
+
+ВАЖНО: статические пути (/messages/bulk/*, /messages/mark_all_*) объявлены
+ДО параметрических (/messages/{uid}...). Иначе FastAPI пытается сопоставить
+их с {uid} (например, uid="bulk") и возвращает 422.
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.schemas.message import FlagRequest, MessageList
+from app.schemas.message import BulkDeleteRequest, BulkFlagRequest, FlagRequest, MessageList
 from app.security.auth import current_session
 from app.services import messages as svc
 from app.services import sync as sync_svc
 from app.utils import decode_folder_param
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/accounts/{account_id}",
@@ -30,6 +38,66 @@ async def get_messages(
     return await svc.list_messages(account_id, folder_name, cursor, limit)
 
 
+# ── Массовые операции (статические пути — ДО /messages/{uid}) ───────────────
+@router.post("/messages/bulk/flags")
+async def update_flags_bulk(
+    account_id: int,
+    body: BulkFlagRequest,
+    folder: str = Query(...),
+) -> dict:
+    folder_name = decode_folder_param(folder)
+    affected = await svc.set_flags_bulk(
+        account_id, folder_name, body.uids, body.flags, body.add
+    )
+    return {"affected": affected}
+
+
+@router.post("/messages/bulk/delete")
+async def delete_messages_bulk(
+    account_id: int,
+    body: BulkDeleteRequest,
+    folder: str = Query(...),
+) -> dict:
+    folder_name = decode_folder_param(folder)
+    affected = await svc.delete_messages_bulk(account_id, folder_name, body.uids)
+    return {"affected": affected}
+
+
+@router.post("/messages/mark_all_read")
+async def mark_all_read(
+    account_id: int,
+    folder: str = Query(...),
+) -> dict:
+    folder_name = decode_folder_param(folder)
+    try:
+        affected = await svc.mark_all_read(account_id, folder_name)
+        return {"affected": affected}
+    except Exception as exc:
+        logger.warning("mark_all_read %s/%s: %s", account_id, folder_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось отметить письма прочитанными",
+        ) from exc
+
+
+@router.post("/messages/mark_all_unread")
+async def mark_all_unread(
+    account_id: int,
+    folder: str = Query(...),
+) -> dict:
+    folder_name = decode_folder_param(folder)
+    try:
+        affected = await svc.mark_all_unread(account_id, folder_name)
+        return {"affected": affected}
+    except Exception as exc:
+        logger.warning("mark_all_unread %s/%s: %s", account_id, folder_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось отметить письма непрочитанными",
+        ) from exc
+
+
+# ── Операции над одним письмом (параметрические пути) ───────────────────────
 @router.get("/messages/{uid}")
 async def get_one_message(
     account_id: int,
@@ -77,21 +145,6 @@ async def delete_message(
     await svc.delete_message(account_id, folder_name, uid)
 
 
-@router.post("/messages/mark_all_read")
-async def mark_all_read(
-    account_id: int,
-    folder: str = Query(...),
-) -> dict:
-    folder_name = decode_folder_param(folder)
-    try:
-        affected = await svc.mark_all_read(account_id, folder_name)
-        return {"affected": affected}
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ошибка: {exc}"
-        ) from exc
-
-
 @router.post("/sync")
 async def force_sync(
     account_id: int,
@@ -103,6 +156,8 @@ async def force_sync(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
+        logger.warning("sync %s/%s: %s", account_id, folder_name, exc)
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ошибка синхронизации: {exc}"
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось синхронизировать папку",
         ) from exc

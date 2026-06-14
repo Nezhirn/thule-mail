@@ -28,7 +28,7 @@ async def login(body: LoginRequest, response: Response) -> SessionInfo:
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,  # за TLS-прокси в проде выставить True
+        secure=settings.cookie_secure,  # True за HTTPS-прокси в проде
         max_age=settings.jwt_ttl_hours * 3600,
         path="/",
     )

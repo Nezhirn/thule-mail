@@ -11,6 +11,9 @@
 from __future__ import annotations
 
 import email
+import re
+from html import unescape
+from html.parser import HTMLParser
 from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import parsedate_to_datetime
@@ -213,7 +216,61 @@ def _parse_date(raw: str | None) -> str | None:
         return None
 
 
+class _SnippetHTMLParser(HTMLParser):
+    """Минимальный HTML→text для preview без внешних зависимостей."""
+
+    _BLOCK_TAGS = {
+        "address", "article", "aside", "blockquote", "br", "div", "footer",
+        "h1", "h2", "h3", "h4", "h5", "h6", "header", "li", "main", "p",
+        "pre", "section", "table", "td", "th", "tr",
+    }
+    _SKIP_TAGS = {"script", "style", "head", "title", "meta", "noscript"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.lower()
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth == 0 and tag in self._BLOCK_TAGS:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in self._SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth == 0 and tag in self._BLOCK_TAGS:
+            self.parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self.parts.append(data)
+
+    def text(self) -> str:
+        return "".join(self.parts)
+
+
+def _looks_like_html(text: str) -> bool:
+    return bool(re.search(r"<!doctype|<html\b|<body\b|</?[a-z][\w:-]*(?:\s[^>]*)?>", text, re.I))
+
+
+def _html_to_text(text: str) -> str:
+    parser = _SnippetHTMLParser()
+    try:
+        parser.feed(text)
+        parser.close()
+        return parser.text()
+    except Exception:
+        return re.sub(r"<[^>]+>", " ", text)
+
+
 def make_snippet(text: str, length: int = 200) -> str:
-    """Короткое превью из text/plain: схлопываем пробелы, обрезаем."""
-    collapsed = " ".join(text.split())
+    """Короткое превью письма: HTML превращаем в текст, пробелы схлопываем."""
+    source = _html_to_text(text) if _looks_like_html(text) else text
+    collapsed = " ".join(unescape(source).split())
     return collapsed[:length]

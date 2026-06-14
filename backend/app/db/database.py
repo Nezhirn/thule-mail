@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -24,6 +25,10 @@ class Database:
     def __init__(self, path: str) -> None:
         self._path = path
         self._conn: aiosqlite.Connection | None = None
+        # Единственное соединение делит commit на всю транзакцию, поэтому
+        # сериализуем запись: иначе commit одной корутины зафиксирует
+        # наполовину выполненный батч другой (фоновый поллинг + запросы).
+        self._write_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(self._path)) or ".", exist_ok=True)
@@ -60,14 +65,16 @@ class Database:
             return list(await cur.fetchall())
 
     async def execute(self, sql: str, params: Sequence[Any] = ()) -> int:
-        """Выполнить запрос, вернуть lastrowid."""
-        cur = await self.conn.execute(sql, params)
-        await self.conn.commit()
-        return cur.lastrowid or 0
+        """Выполнить запись, вернуть lastrowid (под write-lock)."""
+        async with self._write_lock:
+            cur = await self.conn.execute(sql, params)
+            await self.conn.commit()
+            return cur.lastrowid or 0
 
     async def executemany(self, sql: str, seq: Iterable[Sequence[Any]]) -> None:
-        await self.conn.executemany(sql, seq)
-        await self.conn.commit()
+        async with self._write_lock:
+            await self.conn.executemany(sql, seq)
+            await self.conn.commit()
 
 
 # Единый инстанс на процесс.

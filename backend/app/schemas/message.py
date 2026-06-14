@@ -38,6 +38,14 @@ class FlagRequest(BaseModel):
     add: bool = True
 
 
+class BulkFlagRequest(FlagRequest):
+    uids: list[int]
+
+
+class BulkDeleteRequest(BaseModel):
+    uids: list[int]
+
+
 class FolderLayoutItem(BaseModel):
     folder: str
     alias: str | None = None
