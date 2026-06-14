@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from "@tanstack/react-query";
 import { api, encodeFolder } from "./client";
 import type {
@@ -12,6 +14,92 @@ import type {
   MessageList,
   TestConnectionResult,
 } from "./types";
+
+function updateFlag(flags: string[], flag: string, add: boolean) {
+  const next = new Set(flags);
+  if (add) next.add(flag);
+  else next.delete(flag);
+  return Array.from(next).sort();
+}
+
+function patchCollectionSeen<T extends { messages: MessageList["messages"] }>(
+  data: T | undefined,
+  accountId: number,
+  folder: string,
+  uid: number,
+  seen: boolean,
+): T | undefined {
+  if (!data) return data;
+  let changed = false;
+  const messages = data.messages.map((m) => {
+    if (m.account_id !== accountId || m.folder !== folder || m.uid !== uid) return m;
+    changed = true;
+    return { ...m, seen, flags: updateFlag(m.flags, "\\Seen", seen) };
+  });
+  return changed ? { ...data, messages } : data;
+}
+
+function patchSeenCaches(
+  qc: QueryClient,
+  accountId: number,
+  folder: string,
+  uid: number,
+  seen: boolean,
+) {
+  qc.setQueriesData<MessageList>(
+    { queryKey: ["messages"] },
+    (data) => patchCollectionSeen(data, accountId, folder, uid, seen),
+  );
+  qc.setQueryData<MessageList>(
+    ["unified"],
+    (data) => patchCollectionSeen(data, accountId, folder, uid, seen),
+  );
+  qc.setQueriesData<{ messages: MessageList["messages"]; count: number }>(
+    { queryKey: ["search"] },
+    (data) => patchCollectionSeen(data, accountId, folder, uid, seen),
+  );
+  qc.setQueryData<FullMessage>(
+    ["message", accountId, folder, uid],
+    (data) => data
+      ? { ...data, seen, flags: updateFlag(data.flags, "\\Seen", seen) }
+      : data,
+  );
+}
+
+function removeFromCollection<T extends { messages: MessageList["messages"] }>(
+  data: T | undefined,
+  accountId: number,
+  folder: string,
+  uids: number[],
+): T | undefined {
+  if (!data) return data;
+  const uidSet = new Set(uids);
+  const messages = data.messages.filter(
+    (m) => m.account_id !== accountId || m.folder !== folder || !uidSet.has(m.uid),
+  );
+  return messages.length === data.messages.length ? data : { ...data, messages };
+}
+
+function removeMessageCaches(
+  qc: QueryClient,
+  accountId: number,
+  folder: string,
+  uids: number[],
+) {
+  qc.setQueriesData<MessageList>(
+    { queryKey: ["messages"] },
+    (data) => removeFromCollection(data, accountId, folder, uids),
+  );
+  qc.setQueryData<MessageList>(
+    ["unified"],
+    (data) => removeFromCollection(data, accountId, folder, uids),
+  );
+  qc.setQueriesData<{ messages: MessageList["messages"]; count: number }>(
+    { queryKey: ["search"] },
+    (data) => removeFromCollection(data, accountId, folder, uids),
+  );
+  uids.forEach((uid) => qc.removeQueries({ queryKey: ["message", accountId, folder, uid] }));
+}
 
 // ── Сессия ──────────────────────────────────────────────────────────────
 export function useSession() {
@@ -160,7 +248,8 @@ export function useMessage(
   folder: string | null,
   uid: number | null,
 ) {
-  return useQuery({
+  const qc = useQueryClient();
+  const query = useQuery({
     queryKey: ["message", accountId, folder, uid],
     queryFn: () =>
       api.get<FullMessage>(
@@ -168,6 +257,17 @@ export function useMessage(
       ),
     enabled: accountId != null && folder != null && uid != null,
   });
+
+  useEffect(() => {
+    if (!query.data?.seen) return;
+    // Оптимистично помечаем письмо прочитанным во всех списках/кэшах.
+    // Широкие invalidate здесь убраны намеренно: они вызывали рефетч всех
+    // списков и живой IMAP LIST (/folders) на КАЖДОЕ открытие письма.
+    // Счётчики папок освежает фоновый поллинг.
+    patchSeenCaches(qc, query.data.account_id, query.data.folder, query.data.uid, true);
+  }, [qc, query.data?.account_id, query.data?.folder, query.data?.uid, query.data?.seen]);
+
+  return query;
 }
 
 // ── Действия с письмом ──────────────────────────────────────────────────
@@ -197,7 +297,12 @@ export function useMessageActions() {
           `/api/accounts/${accountId}/messages/${uid}/flags?folder=${encodeFolder(folder)}`,
           { flags, add },
         ),
-      onSuccess: invalidate,
+      onSuccess: (_data, vars) => {
+        if (vars.flags.includes("\\Seen")) {
+          patchSeenCaches(qc, vars.accountId, vars.folder, vars.uid, vars.add);
+        }
+        invalidate();
+      },
     }),
     remove: useMutation({
       mutationFn: ({
@@ -214,6 +319,52 @@ export function useMessageActions() {
         ),
       onSuccess: invalidate,
     }),
+    bulkSetFlags: useMutation({
+      mutationFn: ({
+        accountId,
+        folder,
+        uids,
+        flags,
+        add,
+      }: {
+        accountId: number;
+        folder: string;
+        uids: number[];
+        flags: string[];
+        add: boolean;
+      }) =>
+        api.post<{ affected: number }>(
+          `/api/accounts/${accountId}/messages/bulk/flags?folder=${encodeFolder(folder)}`,
+          { uids, flags, add },
+        ),
+      onSuccess: (_data, vars) => {
+        if (vars.flags.includes("\\Seen")) {
+          vars.uids.forEach((uid) =>
+            patchSeenCaches(qc, vars.accountId, vars.folder, uid, vars.add),
+          );
+        }
+        invalidate();
+      },
+    }),
+    bulkRemove: useMutation({
+      mutationFn: ({
+        accountId,
+        folder,
+        uids,
+      }: {
+        accountId: number;
+        folder: string;
+        uids: number[];
+      }) =>
+        api.post<{ affected: number }>(
+          `/api/accounts/${accountId}/messages/bulk/delete?folder=${encodeFolder(folder)}`,
+          { uids },
+        ),
+      onSuccess: (_data, vars) => {
+        removeMessageCaches(qc, vars.accountId, vars.folder, vars.uids);
+        invalidate();
+      },
+    }),
     sync: useMutation({
       mutationFn: ({ accountId, folder }: { accountId: number; folder: string }) =>
         api.post(`/api/accounts/${accountId}/sync?folder=${encodeFolder(folder)}`),
@@ -223,6 +374,13 @@ export function useMessageActions() {
       mutationFn: ({ accountId, folder }: { accountId: number; folder: string }) =>
         api.post<{ affected: number }>(
           `/api/accounts/${accountId}/messages/mark_all_read?folder=${encodeFolder(folder)}`,
+        ),
+      onSuccess: invalidate,
+    }),
+    markAllUnread: useMutation({
+      mutationFn: ({ accountId, folder }: { accountId: number; folder: string }) =>
+        api.post<{ affected: number }>(
+          `/api/accounts/${accountId}/messages/mark_all_unread?folder=${encodeFolder(folder)}`,
         ),
       onSuccess: invalidate,
     }),

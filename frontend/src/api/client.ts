@@ -24,7 +24,7 @@ async function request<T>(
     let detail = res.statusText;
     try {
       const data = await res.json();
-      detail = data.detail || detail;
+      detail = formatDetail(data.detail) || detail;
     } catch {
       /* ignore */
     }
@@ -35,6 +35,23 @@ async function request<T>(
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) return (await res.json()) as T;
   return (await res.text()) as unknown as T;
+}
+
+// FastAPI отдаёт detail строкой ИЛИ массивом ошибок валидации (объекты).
+// Приводим к читаемой строке, чтобы в тостах не было «[object Object]».
+function formatDetail(detail: unknown): string {
+  if (!detail) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((e) => (e && typeof e === "object" && "msg" in e ? (e as { msg: string }).msg : String(e)))
+      .join("; ");
+  }
+  if (typeof detail === "object") {
+    const o = detail as { msg?: string };
+    return o.msg || JSON.stringify(detail);
+  }
+  return String(detail);
 }
 
 export const api = {

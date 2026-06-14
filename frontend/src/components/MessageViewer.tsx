@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import DOMPurify from "dompurify";
 import {
-  CornerUpLeft, CornerUpRight, Forward, ImageOff, Trash2,
+  CornerUpLeft, CornerUpRight, Forward, ImageOff, Mail, MailOpen, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useMessage, useMessageActions } from "../api/hooks";
@@ -16,7 +16,9 @@ import { slideInRight } from "../lib/motion";
 
 export default function MessageViewer() {
   const { openedAccountId, openedFolder, openedUid } = useUI();
-  const { data, isLoading } = useMessage(openedAccountId, openedFolder, openedUid);
+  const { data, isLoading, isError, refetch } = useMessage(
+    openedAccountId, openedFolder, openedUid,
+  );
 
   return (
     <section className="glass-panel flex h-full flex-col overflow-hidden">
@@ -29,6 +31,13 @@ export default function MessageViewer() {
             className="flex h-full items-center justify-center text-sm text-muted"
           >
             Выберите письмо для просмотра
+          </motion.div>
+        ) : isError ? (
+          <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted">
+            Не удалось загрузить письмо.
+            <button onClick={() => refetch()} className="rounded-lg bg-accent px-4 py-1.5 text-white">
+              Повторить
+            </button>
           </motion.div>
         ) : isLoading || !data ? (
           <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex h-full items-center justify-center text-sm text-muted">
@@ -49,10 +58,9 @@ function MessageContent({ message }: { message: FullMessage }) {
   const actions = useMessageActions();
   const { closeMessage } = useUI();
 
-  const { html, hadExternal } = useMemo(
-    () => sanitizeBody(message, showImages),
-    [message, showImages],
-  );
+  // Санитизация не зависит от showImages: внешние ресурсы блокирует CSP iframe
+  // (см. BodyFrame), переключение картинок меняет только CSP, а не HTML.
+  const { html, hadExternal } = useMemo(() => sanitizeBody(message), [message]);
 
   const fromName = parseFromName(message.from);
   const avatarColor = colorFromString(message.from);
@@ -70,6 +78,25 @@ function MessageContent({ message }: { message: FullMessage }) {
     );
   };
 
+  const onToggleSeen = () => {
+    const nextSeen = !message.seen;
+    actions.setFlags.mutate(
+      {
+        accountId: message.account_id,
+        folder: message.folder,
+        uid: message.uid,
+        flags: ["\\Seen"],
+        add: nextSeen,
+      },
+      {
+        onSuccess: () => {
+          toast.success(nextSeen ? "Письмо отмечено прочитанным" : "Письмо отмечено непрочитанным");
+        },
+        onError: () => toast.error("Не удалось изменить статус письма"),
+      },
+    );
+  };
+
   return (
     <>
       <div className="glass-bar flex items-center gap-1 border-b border-sep px-4 py-2">
@@ -77,6 +104,12 @@ function MessageContent({ message }: { message: FullMessage }) {
         <ToolButton icon={<CornerUpRight size={16} />} title="Ответить всем" />
         <ToolButton icon={<Forward size={16} />} title="Переслать" />
         <div className="mx-2 h-4 w-px bg-separator/15" />
+        <ToolButton
+          icon={message.seen ? <Mail size={16} /> : <MailOpen size={16} />}
+          title={message.seen ? "Отметить непрочитанным" : "Отметить прочитанным"}
+          onClick={onToggleSeen}
+          disabled={actions.setFlags.isPending}
+        />
         <ToolButton icon={<Trash2 size={16} />} title="Удалить" onClick={onDelete} />
       </div>
 
@@ -114,7 +147,7 @@ function MessageContent({ message }: { message: FullMessage }) {
           </div>
         )}
 
-        <BodyFrame html={html} />
+        <BodyFrame html={html} allowImages={showImages} />
 
         {message.attachments.length > 0 && (
           <div className="mt-6 flex flex-wrap gap-2.5">
@@ -128,12 +161,15 @@ function MessageContent({ message }: { message: FullMessage }) {
   );
 }
 
-function BodyFrame({ html }: { html: string }) {
-  // Изолированный sandbox-iframe: внешние ресурсы режутся CSP, скрипты запрещены.
+function BodyFrame({ html, allowImages }: { html: string; allowImages: boolean }) {
+  // Изолированный iframe без allow-scripts: JS из письма не исполняется.
+  // Блокировка внешних ресурсов — через CSP img-src: пока картинки скрыты,
+  // не пускаем ни http(s)-src, ни srcset, ни background:url() (CSP покрывает всё).
+  const imgSrc = allowImages ? "data: cid: https: http:" : "data: cid:";
   const srcDoc = useMemo(
     () => `<!DOCTYPE html><html><head><meta charset="utf-8">
       <meta http-equiv="Content-Security-Policy"
-            content="default-src 'none'; img-src data: cid: https:; style-src 'unsafe-inline'; font-src data:;">
+            content="default-src 'none'; img-src ${imgSrc}; style-src 'unsafe-inline'; font-src data:;">
       <base target="_blank">
       <style>
         html,body{background:#fff;}
@@ -142,24 +178,41 @@ function BodyFrame({ html }: { html: string }) {
              border-radius:12px;}
         a{color:#0a84ff;} img{max-width:100%;height:auto;}
       </style></head><body>${html}</body></html>`,
-    [html],
+    [html, imgSrc],
   );
+
+  const fitHeight = (f: HTMLIFrameElement) => {
+    try {
+      const doc = f.contentWindow?.document;
+      const h = doc?.body?.scrollHeight;
+      if (h) f.style.height = `${h + 20}px`;
+    } catch {
+      /* доступ запрещён — остаётся minHeight */
+    }
+  };
 
   return (
     <iframe
       title="Тело письма"
-      sandbox="allow-popups allow-popups-to-escape-sandbox"
+      // allow-same-origin нужен ТОЛЬКО для чтения высоты; allow-scripts НЕ выставлен,
+      // поэтому код письма всё равно не исполняется.
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       srcDoc={srcDoc}
       className="mt-4 w-full"
-      style={{ minHeight: 300, border: "none" }}
+      style={{ minHeight: 120, border: "none" }}
       onLoad={(e) => {
-        // Подгоняем высоту под контент.
         const f = e.currentTarget;
+        fitHeight(f);
+        // Пересчёт после догрузки изображений (высота меняется асинхронно).
         try {
-          const h = f.contentWindow?.document.body.scrollHeight;
-          if (h) f.style.height = `${h + 20}px`;
+          const imgs = f.contentWindow?.document.images;
+          if (imgs) {
+            Array.from(imgs).forEach((img) =>
+              img.addEventListener("load", () => fitHeight(f), { once: true }),
+            );
+          }
         } catch {
-          /* cross-origin — оставляем minHeight */
+          /* ignore */
         }
       }}
     />
@@ -187,12 +240,15 @@ function AttachmentCard({ attachment, message }: { attachment: Attachment; messa
   );
 }
 
-function ToolButton({ icon, title, onClick }: { icon: React.ReactNode; title: string; onClick?: () => void }) {
+function ToolButton({
+  icon, title, onClick, disabled,
+}: { icon: React.ReactNode; title: string; onClick?: () => void; disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       title={title}
-      className="flex h-8 w-9 items-center justify-center rounded-lg text-muted transition hover:bg-hover/5 hover:text-content"
+      className="flex h-8 w-9 items-center justify-center rounded-lg text-muted transition hover:bg-hover/5 hover:text-content disabled:pointer-events-none disabled:opacity-45"
     >
       {icon}
     </button>
@@ -206,21 +262,16 @@ function parseFromName(from: string): string {
   return from.replace(/[<>]/g, "").trim();
 }
 
-function sanitizeBody(message: FullMessage, showImages: boolean): { html: string; hadExternal: boolean } {
+function sanitizeBody(message: FullMessage): { html: string; hadExternal: boolean } {
   if (message.html) {
-    // Перехватываем внешние img: если картинки скрыты — вырезаем src.
-    let hadExternal = false;
-    DOMPurify.addHook("uponSanitizeAttribute", (_node, data) => {
-      if (data.attrName === "src" && /^https?:\/\//i.test(data.attrValue)) {
-        hadExternal = true;
-        if (!showImages) data.keepAttr = false;
-      }
-    });
+    // Чистая санитизация без глобальных хуков DOMPurify (избегаем гонок между
+    // экземплярами). on*-обработчики и опасные теги DOMPurify режет по умолчанию;
+    // дополнительно запрещаем теги, способные тянуть ресурсы/угонять навигацию.
     const clean = DOMPurify.sanitize(message.html, {
-      FORBID_TAGS: ["script", "style", "iframe", "object", "embed"],
-      FORBID_ATTR: ["onerror", "onload", "onclick"],
+      FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "base", "link", "meta", "frame"],
+      FORBID_ATTR: ["ping", "formaction"],
     });
-    DOMPurify.removeAllHooks();
+    const hadExternal = detectExternalResources(clean);
     return { html: clean, hadExternal };
   }
   // Plain text fallback.
@@ -228,4 +279,23 @@ function sanitizeBody(message: FullMessage, showImages: boolean): { html: string
     ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] || c),
   );
   return { html: `<pre style="white-space:pre-wrap;font-family:inherit">${text}</pre>`, hadExternal: false };
+}
+
+// Есть ли в письме внешние ресурсы (img/srcset/inline background-url), которые
+// блокирует CSP. Нужно только чтобы показать баннер «Показать изображения».
+function detectExternalResources(html: string): boolean {
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const isExternal = (v: string | null) =>
+      !!v && /^(https?:)?\/\//i.test(v.trim()) && !/^data:|^cid:/i.test(v.trim());
+    for (const el of Array.from(doc.querySelectorAll("img, source, [style]"))) {
+      if (isExternal(el.getAttribute("src"))) return true;
+      if (el.getAttribute("srcset")) return true;
+      const style = el.getAttribute("style") || "";
+      if (/url\(\s*['"]?(https?:)?\/\//i.test(style)) return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
 }

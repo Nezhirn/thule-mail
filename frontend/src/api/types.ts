@@ -59,6 +59,10 @@ export interface FullMessage {
   account_id: number;
   folder: string;
   uid: number;
+  flags: string[];
+  seen: boolean;
+  flagged: boolean;
+  answered: boolean;
   subject: string;
   from: string;
   to: string;
