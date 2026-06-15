@@ -4,8 +4,12 @@
 один пользователь). Мультиаккаунт + объединённый входящий, стиль Apple Mail,
 светлая/тёмная темы.
 
+**Единый сервис:** бэкенд на порту **8000** отдаёт и API (`/api/*`), и собранный
+фронтенд по базовому URL (со SPA-роутингом). Отдельный веб-сервер не нужен —
+один процесс, один origin, cookie-сессия работает без прокси и CORS.
+
 - **Backend:** FastAPI + IMAPClient (пул соединений на аккаунт) + SQLite-кэш +
-  Fernet-шифрование учёток + JWT-сессия.
+  Fernet-шифрование учёток + JWT-сессия; раздаёт статику фронта.
 - **Frontend:** React + TypeScript + Vite + Tailwind, TanStack Query, Zustand,
   react-virtuoso, Framer Motion, Tiptap, DOMPurify.
 
@@ -39,35 +43,37 @@
    docker compose up -d --build
    ```
 
-   Фронтенд доступен на `http://localhost:3000` (порт меняется через
-   `FRONTEND_PORT`). Бэкенд наружу не публикуется — только через nginx фронта.
+   Приложение целиком (UI + API) доступно на `http://localhost:8000`
+   (порт меняется через `APP_PORT`). Образ собирает фронт и кладёт его внутрь;
    SQLite-кэш хранится в именованном томе `thulemail-data`.
 
 > **Прод за HTTPS:** ставьте `COOKIE_SECURE=true` и терминируйте TLS на внешнем
-> reverse-proxy (nginx/Caddy/Traefik), проксируя на frontend-контейнер.
-> Бэкенд запускается с `--proxy-headers`.
+> reverse-proxy (nginx/Caddy/Traefik), проксируя на контейнер. Приложение
+> запускается с `--proxy-headers`. Лимит размера тела (вложения) задайте на
+> прокси, напр. nginx `client_max_body_size 30m`.
 
 ---
 
 ## Локальная разработка (без Docker)
 
-Backend (Python 3.12+):
+**Вариант A — единый процесс (как в проде):** собрать фронт, бэкенд раздаст его.
 
 ```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
+cd frontend && npm install && npm run build      # → frontend/dist
+cd ../backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# .env с ENVIRONMENT=dev допускает упрощённые секреты
-ENVIRONMENT=dev uvicorn app.main:app --reload --port 8000
+ENVIRONMENT=dev uvicorn app.main:app --reload --port 8000   # всё на :8000
 ```
 
-Frontend (Node 20+):
+**Вариант B — раздельно с HMR** (удобно для разработки UI): vite на :3000
+проксирует `/api` на бэкенд :8000.
 
 ```bash
-cd frontend
-npm install
-npm run dev   # http://localhost:3000, /api проксируется на :8000
+cd backend && ENVIRONMENT=dev uvicorn app.main:app --reload --port 8000
+# во втором терминале:
+cd frontend && npm install && npm run dev          # http://localhost:3000
 ```
+Для варианта B задайте `ALLOWED_ORIGINS=http://localhost:3000`.
 
 Тесты бэкенда:
 

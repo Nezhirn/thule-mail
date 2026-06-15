@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # Хранилище
     database_path: str = "./data/thulemail.db"
 
+    # Каталог собранного фронтенда (vite dist). Пусто — автоопределение
+    # ../frontend/dist относительно бэкенда. Если каталога нет — раздача SPA
+    # отключается (режим «только API», например при `vite dev`).
+    static_dir: str = ""
+
     # IMAP / синхронизация
     imap_pool_size: int = 3
     sync_interval_seconds: int = 60

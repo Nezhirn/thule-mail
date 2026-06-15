@@ -4,10 +4,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db.database import close_db, get_db, init_db
@@ -138,11 +140,41 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/")
-async def root() -> dict:
-    return {
-        "status": "ok",
-        "service": "ThuleMail API",
-        "docs": "/docs",
-        "health": "/api/health",
-    }
+# ── Раздача собранного фронтенда (SPA) с того же origin, что и API ──────────
+def _resolve_static_dir() -> Path | None:
+    if settings.static_dir:
+        path = Path(settings.static_dir).resolve()
+    else:
+        # backend/app/main.py → repo/frontend/dist
+        path = (Path(__file__).resolve().parents[2] / "frontend" / "dist").resolve()
+    return path if path.is_dir() else None
+
+
+_static_dir = _resolve_static_dir()
+
+if _static_dir is not None:
+    assets_dir = _static_dir / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    _index_file = _static_dir / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str) -> Response:
+        """Любой не-API путь отдаёт файл из dist либо index.html (SPA-роутинг)."""
+        if full_path.startswith("api"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        candidate = (_static_dir / full_path).resolve()
+        # Защита от path traversal: остаёмся внутри static_dir.
+        if (
+            full_path
+            and _static_dir in candidate.parents
+            and candidate.is_file()
+        ):
+            return FileResponse(candidate)
+        return FileResponse(_index_file)
+else:
+    logger.warning(
+        "Каталог собранного фронтенда не найден — режим только API. "
+        "Соберите фронт (npm run build) или задайте STATIC_DIR."
+    )

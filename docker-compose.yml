@@ -1,6 +1,6 @@
 services:
-  backend:
-    build: ./backend
+  app:
+    build: .
     restart: unless-stopped
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-prod}
@@ -9,22 +9,15 @@ services:
       APP_USER: ${APP_USER:?Задайте APP_USER в .env}
       APP_PASSWORD: ${APP_PASSWORD:?Задайте APP_PASSWORD в .env}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      # Один origin (фронт раздаётся бэком), CORS по сути не нужен.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       DATABASE_PATH: /app/data/thulemail.db
       SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-60}
     volumes:
       - thulemail-data:/app/data
-    # Порт наружу НЕ публикуем — доступ только через frontend-nginx.
-    expose:
-      - "8000"
-
-  frontend:
-    build: ./frontend
-    restart: unless-stopped
-    depends_on:
-      - backend
+    # Весь сервис (UI + API) на одном порту.
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      - "${APP_PORT:-8000}:8000"
 
 volumes:
   thulemail-data:

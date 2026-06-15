@@ -1,0 +1,23 @@
+# Секреты и данные
+.env
+.env.*
+backend/.env
+backend/data/
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Сборки и зависимости
+frontend/node_modules/
+frontend/dist/
+backend/.venv/
+backend/venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Прочее
+.git/
+prototypes/
+*.md
